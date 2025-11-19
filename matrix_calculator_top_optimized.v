@@ -10,31 +10,53 @@ module matrix_calculator_top_optimized (
     input wire clk,
     input wire rst_n,
     input wire [2:0] dip_sw,
-    input wire btn_confirm，
-    input wire btn_back,
+    input wire btn_confirm,  // 物理按键
+    input wire btn_back,     // 物理按键
     input wire uart_rx,
     output wire uart_tx,
-    output reg [6:0] seg_display,
+    output wire [6:0] seg_display, // 注意：display_ctrl 内部驱动，这�? wire 即可
     output wire [3:0] led_status,
-    output reg [1:0] seg_select
+    output wire [1:0] seg_select
 );
 
-// ========================================
-// Main State Machine
-// ========================================
-reg [2:0] main_state, main_state_next;
-reg [3:0] op_type;
-wire [3:0] op_type_from_compute;
+    // ========================================
+    // 1. 按键消抖 (Debouncing) - 核心修复
+    // ========================================
+    wire btn_confirm_db;
+    wire btn_back_db;
+    
+    // 只有�?测到消抖后的信号的上升沿 (posedge) 才视为一次触�?
+    wire btn_confirm_pulse; 
+    wire btn_back_pulse;
+    reg btn_confirm_r, btn_back_r;
 
-// Mode active signals
-wire input_mode_active, generate_mode_active, display_mode_active;
-wire compute_mode_active, setting_mode_active;
+    button_debounce db_confirm (
+        .clk(clk), .rst_n(rst_n), .btn_in(btn_confirm), .btn_out(btn_confirm_db)
+    );
+    button_debounce db_back (
+        .clk(clk), .rst_n(rst_n), .btn_in(btn_back), .btn_out(btn_back_db)
+    );
 
-assign input_mode_active = (main_state == `MAIN_MENU || main_state == `MODE_INPUT);
-assign generate_mode_active = (main_state == `MODE_GENERATE);
-assign display_mode_active = (main_state == `MODE_DISPLAY);
-assign compute_mode_active = (main_state == `MODE_COMPUTE);
-assign setting_mode_active = (main_state == `MODE_SETTING);
+    // 生成单脉冲信�? (Edge Detection)
+    always @(posedge clk) begin
+        btn_confirm_r <= btn_confirm_db;
+        btn_back_r    <= btn_back_db;
+    end
+    assign btn_confirm_pulse = btn_confirm_db & ~btn_confirm_r;
+    assign btn_back_pulse    = btn_back_db    & ~btn_back_r;
+
+    // ========================================
+    // Main State Machine
+    // ========================================
+    reg [2:0] main_state, main_state_next;
+    wire [3:0] op_type_from_compute;
+    
+    // Mode active signals
+    wire input_mode_active = (main_state == `MODE_INPUT);
+    wire generate_mode_active = (main_state == `MODE_GENERATE);
+    wire display_mode_active = (main_state == `MODE_DISPLAY);
+    wire compute_mode_active = (main_state == `MODE_COMPUTE);
+    wire setting_mode_active = (main_state == `MODE_SETTING);
 
 // ========================================
 // Configuration Parameters
@@ -162,41 +184,41 @@ wire [3:0] query_slot_display, query_slot_compute;
 assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_compute;
 
 // ========================================
-// Main State Machine Logic
-// ========================================
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        main_state <= `MAIN_MENU;
-        // Removed op_type_latch reset
-    end else begin
-        main_state <= main_state_next;
-        // Removed the latching logic here
+    // State Machine Logic (Updated with Debounced Buttons)
+    // ========================================
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            main_state <= `MAIN_MENU;
+        end else begin
+            main_state <= main_state_next;
+        end
     end
-end
 
-always @(*) begin
-    main_state_next = main_state;
-    case (main_state)
-        `MAIN_MENU: begin
-            if (btn_confirm) begin
-                case (dip_sw)
-                    3'd1: main_state_next = `MODE_INPUT;
-                    3'd2: main_state_next = `MODE_GENERATE;
-                    3'd3: main_state_next = `MODE_DISPLAY;
-                    3'd4: main_state_next = `MODE_COMPUTE;
-                    3'd5: main_state_next = `MODE_SETTING;
-                    default: main_state_next = `MAIN_MENU;
-                endcase
+    always @(*) begin
+        main_state_next = main_state;
+        case (main_state)
+            `MAIN_MENU: begin
+                // 在主菜单，按下确认键进入对应模式
+                if (btn_confirm_pulse) begin
+                    case (dip_sw)
+                        3'd1: main_state_next = `MODE_INPUT;
+                        3'd2: main_state_next = `MODE_GENERATE;
+                        3'd3: main_state_next = `MODE_DISPLAY;
+                        3'd4: main_state_next = `MODE_COMPUTE;
+                        3'd5: main_state_next = `MODE_SETTING;
+                        default: main_state_next = `MAIN_MENU;
+                    endcase
+                end
             end
-        end
-        
-        default: begin
-            if (btn_back) begin
-                main_state_next = `MAIN_MENU;
+            
+            default: begin
+                // 在任何子模式下，按下返回键回到主菜单
+                if (btn_back_pulse) begin
+                    main_state_next = `MAIN_MENU;
+                end
             end
-        end
-    endcase
-end
+        endcase
+    end
 
 // ========================================
 // Sub-state and Error Multiplexing
@@ -420,35 +442,35 @@ display_mode display_mode_inst (
 // Compute Mode Module
 // ========================================
 compute_mode compute_mode_inst (
-    .clk(clk),
-    .rst_n(rst_n),
-    .mode_active(compute_mode_active),
-    .config_max_dim(config_max_dim),
-    
-    // NEW CONNECTIONS
-    .dip_sw(dip_sw),               // Pass raw switches
-    .btn_confirm(btn_confirm),     // Pass confirm button
-    .selected_op_type(op_type_from_compute), // Get selected OP
-    
-    .rx_data(rx_data),
-    .rx_valid(rx_valid),
-    .clear_rx_buffer(clear_rx_compute),
-    .tx_data(tx_data_compute),
-    .tx_start(tx_start_compute),
-    .tx_busy(tx_busy),
-    .total_matrix_count(total_matrix_count),
-    .query_slot(query_slot_compute),
-    .query_valid(query_valid),
-    .query_m(query_m),
-    .query_n(query_n),
-    .query_addr(query_addr),
-    .query_element_count(query_element_count),
-    .mem_rd_en(mem_rd_en_compute),
-    .mem_rd_addr(mem_rd_addr_compute),
-    .mem_rd_data(mem_rd_data),
-    .error_code(error_code_compute),
-    .sub_state(sub_state_compute)
-);
+        .clk(clk),
+        .rst_n(rst_n),
+        .mode_active(compute_mode_active),
+        .config_max_dim(config_max_dim),
+        
+        // 传入消抖后的脉冲信号，�?�不是原始按键！
+        .dip_sw(dip_sw),               
+        .btn_confirm(btn_confirm_pulse), // fix: 使用脉冲信号
+        .selected_op_type(op_type_from_compute), 
+        
+        .rx_data(rx_data),
+        .rx_valid(rx_valid),
+        .clear_rx_buffer(clear_rx_compute),
+        .tx_data(tx_data_compute),
+        .tx_start(tx_start_compute),
+        .tx_busy(tx_busy),
+        .total_matrix_count(total_matrix_count),
+        .query_slot(query_slot_compute),
+        .query_valid(query_valid),
+        .query_m(query_m),
+        .query_n(query_n),
+        .query_addr(query_addr),
+        .query_element_count(query_element_count),
+        .mem_rd_en(mem_rd_en_compute),
+        .mem_rd_addr(mem_rd_addr_compute),
+        .mem_rd_data(mem_rd_data),
+        .error_code(error_code_compute),
+        .sub_state(sub_state_compute)
+    );
 
 // ========================================
 // Setting Mode Module
@@ -471,53 +493,24 @@ setting_mode setting_mode_inst (
 );
 
 wire [6:0] display_main;
-wire [6:0] display_sub;
+wire [6:0] display_op;
 // ========================================
 // Display Control Module
 // ========================================
 display_ctrl disp_ctrl_inst (
-    .clk(clk),
-    .rst_n(rst_n),
-    .main_state(main_state),
-    .sub_state(sub_state),
-    
-    // UPDATED: Use the OP type coming from inside compute mode
-    .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
-    
-    .error_code(error_code),
-    .error_timer(error_timer[25:20]),
-    .seg_display(display_main),
-    .led_status(led_status),
-    .seg_display_subtype(display_sub)
-);
-
-reg [20:0] clk_div; // 分频器寄存器，21位足够表示2,000,000
-reg clk_50hz;       // 50Hz 时钟信号
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        clk_div <= 21'b0;
-        clk_50hz <= 1'b0;
-    end else if (clk_div == 21'd1_999_999) begin // 分频值为 2,000,000 - 1
-        clk_div <= 21'b0;
-        clk_50hz <= ~clk_50hz; // 翻转输出时钟信号
-    end else begin
-        clk_div <= clk_div + 1;
-    end
-end
-
-always @(posedge clk_50hz or negedge rst_n) begin 
-    if (!rst_n) 
-        seg_select <= 2'b01;
-    else 
-        seg_select <= (seg_select == 2'b01) ? 2'b10 : 2'b01;
-end
-
-always @(*) begin 
-    case(seg_select) 
-      2'b10: seg_display = display_main;
-      2'b01: seg_display = display_sub;
-    endcase
-end
+        .clk(clk),
+        .rst_n(rst_n),
+        .main_state(main_state),
+        .sub_state(sub_state),
+        
+        // 如果�? Compute 模式，传�? op_type，否则为 0
+        .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
+        
+        .error_code(error_code),
+        .error_timer(error_timer[25:20]),
+        .seg_display(seg_display), // 直接连接�? Output Port
+        .led_status(led_status),
+        .seg_select(seg_select)    // 直接连接�? Output Port
+    );
 
 endmodule
