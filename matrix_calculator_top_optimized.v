@@ -14,7 +14,7 @@ module matrix_calculator_top_optimized (
     input wire btn_back,     // 物理按键
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display, // 注意：display_ctrl 内部驱动，这�? wire 即可
+    output wire [6:0] seg_display, // 注意：display_ctrl 内部驱动，这�??? wire 即可
     output wire [3:0] led_status,
     output wire [1:0] seg_select
 );
@@ -22,31 +22,42 @@ module matrix_calculator_top_optimized (
     // ========================================
     // 1. 按键消抖 (Debouncing) - 核心修复
     // ========================================
+    wire btn_confirm_active_high;
+    wire btn_back_active_high;
+    
+    assign btn_confirm_active_high = ~btn_confirm; // <--- 关键修复�??
+    assign btn_back_active_high    = ~btn_back;    // <--- 关键修复�??
+
     wire btn_confirm_db;
     wire btn_back_db;
     
+    // 只有�??测到消抖后的信号的上升沿 (posedge) 才视为一次触�??
+    wire btn_confirm_pulse; 
+    wire btn_back_pulse;
     reg btn_confirm_r, btn_back_r;
-    wire btn_confirm_pulse, btn_back_pulse;
 
+    // [修改] 步骤 1: 传入取反后的信号 (_active_high)
     button_debounce db_confirm (
-        .clk(clk), .rst_n(rst_n), .btn_in(btn_confirm), .btn_out(btn_confirm_db)
+        .clk(clk), .rst_n(rst_n), 
+        .btn_in(btn_confirm_active_high), // <--- 注意这里改了变量�??
+        .btn_out(btn_confirm_db)
     );
     button_debounce db_back (
-        .clk(clk), .rst_n(rst_n), .btn_in(btn_back), .btn_out(btn_back_db)
+        .clk(clk), .rst_n(rst_n), 
+        .btn_in(btn_back_active_high),    // <--- 注意这里改了变量�??
+        .btn_out(btn_back_db)
     );
 
-    // 修复：改为上升沿检测 (按下触发)，且复位值为 0
+    // [保持] 步骤 2: 边沿�??�?? (这部分你的代码已经是修复过的，不用动)
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            btn_confirm_r <= 1'b0; // 修复：复位为0
-            btn_back_r    <= 1'b0; // 修复：复位为0
+            btn_confirm_r <= 1'b0;
+            btn_back_r    <= 1'b0;
         end else begin
             btn_confirm_r <= btn_confirm_db;
             btn_back_r    <= btn_back_db;
         end
     end
-
-    // 逻辑：当前是1 (pressed)，上一次是0 (released) -> 上升沿
     assign btn_confirm_pulse = btn_confirm_db & ~btn_confirm_r;
     assign btn_back_pulse    = btn_back_db    & ~btn_back_r;
     // ========================================
@@ -209,13 +220,13 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
                         3'd3: main_state_next = `MODE_DISPLAY;
                         3'd4: main_state_next = `MODE_COMPUTE;
                         3'd5: main_state_next = `MODE_SETTING;
-                        // 建议：这里可以不做任何事，或者让错误LED闪烁一下提示用户没拨开关
+                        // 建议：这里可以不做任何事，或者让错误LED闪烁�??下提示用户没拨开�??
                         default: main_state_next = `MAIN_MENU; 
                     endcase
                 end
             end
             
-            default: begin // 在任何子模式下
+            default: begin // 在任何子模式�??
                 if (btn_back_pulse) begin
                     main_state_next = `MAIN_MENU;
                 end
@@ -506,31 +517,15 @@ display_ctrl disp_ctrl_inst (
         .main_state(main_state),
         .sub_state(sub_state),
         
-        // 如果�? Compute 模式，传�? op_type，否则为 0
+        // 如果�??? Compute 模式，传�??? op_type，否则为 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         
         .error_code(error_code),
         .error_timer(error_timer[25:20]),
-        .seg_display(seg_display), // 直接连接�? Output Port
+        .seg_display(seg_display), // 直接连接�??? Output Port
         .led_status(led_status),
-        .seg_select(seg_select)    // 直接连接�? Output Port
+        .seg_select(seg_select)    // 直接连接�??? Output Port
     );
 
-reg [3:0] led_debug_r;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        led_debug_r <= 4'b0000;
-    end else begin
-        // 🚨 关键：将单周期脉冲捕获到一个寄存器中
-        // 否则脉冲太快，LED 可能无法显示
-        if (btn_confirm_pulse) begin
-            led_debug_r[0] <= ~led_debug_r[0]; // 每次脉冲到达，翻转 LED[0] 状态
-        end
-        if (btn_back_pulse) begin
-            led_debug_r[1] <= ~led_debug_r[1]; // 每次脉冲到达，翻转 LED[1] 状态
-        end
-    end
-end
 
 endmodule
