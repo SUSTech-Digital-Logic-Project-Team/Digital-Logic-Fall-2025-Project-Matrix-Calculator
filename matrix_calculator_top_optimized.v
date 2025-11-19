@@ -14,20 +14,17 @@ module matrix_calculator_top_optimized (
     input wire btn_back,
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display,
+    output reg [6:0] seg_display,
     output wire [3:0] led_status,
-    output wire seg_select,
-    output wire [6:0] seg_display_subtype
+    output reg [1:0] seg_select
 );
-
-assign seg_select = 1'b1;
 
 // ========================================
 // Main State Machine
 // ========================================
 reg [2:0] main_state, main_state_next;
 reg [3:0] op_type;
-reg [3:0] op_type_latch;
+wire [3:0] op_type_from_compute;
 
 // Mode active signals
 wire input_mode_active, generate_mode_active, display_mode_active;
@@ -170,26 +167,15 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         main_state <= `MAIN_MENU;
-        op_type <= 4'd0;
-        op_type_latch <= 4'd0;
+        // Removed op_type_latch reset
     end else begin
         main_state <= main_state_next;
-        
-        // Latch operation type when in MAIN_MENU
-        if (main_state == `MAIN_MENU && dip_sw != 3'd4) begin
-            op_type_latch <= {1'b0, dip_sw};
-        end
-        
-        // Set operation type when entering compute mode
-        if (main_state == `MAIN_MENU && main_state_next == `MODE_COMPUTE) begin
-            op_type <= op_type_latch;
-        end
+        // Removed the latching logic here
     end
 end
 
 always @(*) begin
     main_state_next = main_state;
-    
     case (main_state)
         `MAIN_MENU: begin
             if (btn_confirm) begin
@@ -425,7 +411,7 @@ display_mode display_mode_inst (
     .query_element_count(query_element_count),
     .mem_rd_en(mem_rd_en_display),
     .mem_rd_addr(mem_rd_addr_display),
-    .mem_rd_data(mem_a_dout),
+    .mem_rd_data(mem_rd_data), // Corrected connection
     .error_code(error_code_display),
     .sub_state(sub_state_display)
 );
@@ -438,7 +424,12 @@ compute_mode compute_mode_inst (
     .rst_n(rst_n),
     .mode_active(compute_mode_active),
     .config_max_dim(config_max_dim),
-    .op_type(op_type),
+    
+    // NEW CONNECTIONS
+    .dip_sw(dip_sw),               // Pass raw switches
+    .btn_confirm(btn_confirm),     // Pass confirm button
+    .selected_op_type(op_type_from_compute), // Get selected OP
+    
     .rx_data(rx_data),
     .rx_valid(rx_valid),
     .clear_rx_buffer(clear_rx_compute),
@@ -454,7 +445,7 @@ compute_mode compute_mode_inst (
     .query_element_count(query_element_count),
     .mem_rd_en(mem_rd_en_compute),
     .mem_rd_addr(mem_rd_addr_compute),
-    .mem_rd_data(mem_a_dout),
+    .mem_rd_data(mem_rd_data),
     .error_code(error_code_compute),
     .sub_state(sub_state_compute)
 );
@@ -479,6 +470,8 @@ setting_mode setting_mode_inst (
     .sub_state(sub_state_setting)
 );
 
+wire [6:0] display_main;
+wire [6:0] display_sub;
 // ========================================
 // Display Control Module
 // ========================================
@@ -487,12 +480,44 @@ display_ctrl disp_ctrl_inst (
     .rst_n(rst_n),
     .main_state(main_state),
     .sub_state(sub_state),
-    .op_type(op_type),
+    
+    // UPDATED: Use the OP type coming from inside compute mode
+    .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
+    
     .error_code(error_code),
     .error_timer(error_timer[25:20]),
-    .seg_display(seg_display),
-    .led_status(led_status)
-    .seg_display_subtype(seg_display_subtype)
+    .seg_display(display_main),
+    .led_status(led_status),
+    .seg_display_subtype(display_sub)
 );
+
+reg [20:0] clk_div; // 分频器寄存器，21位足够表示2,000,000
+reg clk_50hz;       // 50Hz 时钟信号
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        clk_div <= 21'b0;
+        clk_50hz <= 1'b0;
+    end else if (clk_div == 21'd1_999_999) begin // 分频值为 2,000,000 - 1
+        clk_div <= 21'b0;
+        clk_50hz <= ~clk_50hz; // 翻转输出时钟信号
+    end else begin
+        clk_div <= clk_div + 1;
+    end
+end
+
+always @(posedge clk_50hz or negedge rst_n) begin 
+    if (!rst_n) 
+        seg_select <= 2'b01;
+    else 
+        seg_select <= (seg_select == 2'b01) ? 2'b10 : 2'b01;
+end
+
+always @(*) begin 
+    case(seg_select) 
+      2'b10: seg_display = display_main;
+      2'b01: seg_display = display_sub;
+    endcase
+end
 
 endmodule
