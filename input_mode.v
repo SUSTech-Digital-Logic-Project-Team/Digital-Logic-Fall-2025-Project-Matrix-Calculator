@@ -48,6 +48,7 @@ module input_mode #(
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
     
     // Memory read interface (for display)
+    output reg mem_rd_en,
     output reg [ADDR_WIDTH-1:0] mem_rd_addr,
     input wire [ELEMENT_WIDTH-1:0] mem_rd_data,
     
