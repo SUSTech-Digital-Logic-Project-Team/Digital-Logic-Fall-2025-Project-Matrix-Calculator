@@ -47,6 +47,10 @@ module input_mode #(
     output reg [ADDR_WIDTH-1:0] mem_wr_addr,
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
     
+    // Memory read interface (for display)
+    output reg [ADDR_WIDTH-1:0] mem_rd_addr,
+    input wire [ELEMENT_WIDTH-1:0] mem_rd_data,
+    
     // Error and state output
     output reg [3:0] error_code,
     output reg [3:0] sub_state
@@ -59,9 +63,11 @@ localparam IDLE = 4'd0,
            CHECK_DIM = 4'd3,
            WAIT_ALLOC = 4'd4,
            PARSE_DATA = 4'd5,
-           COMMIT = 4'd6,
-           DONE = 4'd7,
-           ERROR = 4'd8;
+           FILL_ZEROS = 4'd6,
+           COMMIT = 4'd7,
+           DISPLAY_MATRIX = 4'd8,
+           DONE = 4'd9,
+           ERROR = 4'd10;
 
 // Streaming parse registers
 reg [7:0] parse_accum;        // Accumulator for multi-digit number (e.g., "12" -> 12)
@@ -70,6 +76,12 @@ reg [7:0] total_elements;     // Pre-computed M*N to avoid repeated multiply
 reg [7:0] elements_written;   // Count of elements written to BRAM
 reg [3:0] input_matrix_slot;
 reg [ADDR_WIDTH-1:0] input_alloc_addr;
+
+// Display formatting registers
+reg [3:0] display_row;        // Current row being displayed
+reg [3:0] display_col;        // Current column being displayed
+reg [2:0] display_step;       // Sub-state for formatting (0=newline, 1=space, 2=digit)
+reg [ELEMENT_WIDTH-1:0] display_value;  // Current element value to display
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -81,9 +93,14 @@ always @(posedge clk or negedge rst_n) begin
         elements_written <= 8'd0;
         input_matrix_slot <= 4'd0;
         input_alloc_addr <= {ADDR_WIDTH{1'b0}};
+        display_row <= 4'd0;
+        display_col <= 4'd0;
+        display_step <= 3'd0;
+        display_value <= {ELEMENT_WIDTH{1'b0}};
         mem_wr_en <= 1'b0;
         mem_wr_addr <= {ADDR_WIDTH{1'b0}};
         mem_wr_data <= {ELEMENT_WIDTH{1'b0}};
+        mem_rd_addr <= {ADDR_WIDTH{1'b0}};
         alloc_req <= 1'b0;
         alloc_m <= 4'd0;
         alloc_n <= 4'd0;
@@ -197,7 +214,16 @@ always @(posedge clk or negedge rst_n) begin
             
             PARSE_DATA: begin
                 if (rx_done) begin
-                    if (rx_data >= "0" && rx_data <= "9") begin
+                    if (rx_data == 8'h0D || rx_data == 8'h0A) begin
+                        // Enter key pressed - finish input early
+                        if (elements_written < total_elements) begin
+                            // Need to fill remaining with zeros
+                            sub_state <= FILL_ZEROS;
+                        end else begin
+                            // Already complete
+                            sub_state <= COMMIT;
+                        end
+                    end else if (rx_data >= "0" && rx_data <= "9") begin
                         // Single-digit immediate value
                         if ((rx_data - "0") > {4'd0, config_max_value}) begin
                             error_code <= `ERR_VALUE_RANGE;
@@ -209,18 +235,32 @@ always @(posedge clk or negedge rst_n) begin
                             mem_wr_data <= rx_data - "0";
                             elements_written <= elements_written + 1'b1;
                             
-                            // Check if done
+                            // Check if done (reached total_elements)
                             if ((elements_written + 1'b1) >= total_elements) begin
                                 sub_state <= COMMIT;
                             end
                         end
+                        // If elements_written >= total_elements, ignore (auto truncate)
                     end
-                    // Ignore non-digit characters (spaces, commas, newlines are skipped)
+                    // Space and other non-digit characters are ignored (used as separators)
                     // 发送确认信息：回显接收到的数据
                     if (!tx_busy) begin
                         tx_data <= rx_data; // 回显接收到的字符
                         tx_start <= 1'b1;
                     end
+                end
+            end
+            
+            FILL_ZEROS: begin
+                // Fill remaining elements with zeros
+                if (elements_written < total_elements) begin
+                    mem_wr_en <= 1'b1;
+                    mem_wr_addr <= input_alloc_addr + elements_written;
+                    mem_wr_data <= {ELEMENT_WIDTH{1'b0}}; // Write 0
+                    elements_written <= elements_written + 1'b1;
+                end else begin
+                    // Done filling
+                    sub_state <= COMMIT;
                 end
             end
             
@@ -230,7 +270,91 @@ always @(posedge clk or negedge rst_n) begin
                 commit_m <= input_m;
                 commit_n <= input_n;
                 commit_addr <= input_alloc_addr;
-                sub_state <= DONE;
+                display_row <= 4'd0;
+                display_col <= 4'd0;
+                display_step <= 3'd0;
+                sub_state <= DISPLAY_MATRIX;
+            end
+            
+            DISPLAY_MATRIX: begin
+                commit_req <= 1'b0;
+                
+                case (display_step)
+                    3'd0: begin // Send newline at start of row
+                        if (!tx_busy && !tx_start) begin
+                            tx_data <= 8'h0D; // Carriage return
+                            tx_start <= 1'b1;
+                            display_step <= 3'd1;
+                        end
+                    end
+                    
+                    3'd1: begin // Send line feed
+                        if (!tx_busy && !tx_start) begin
+                            tx_data <= 8'h0A; // Line feed
+                            tx_start <= 1'b1;
+                            display_step <= 3'd2;
+                        end
+                    end
+                    
+                    3'd2: begin // Request memory read for current element
+                        mem_rd_addr <= input_alloc_addr + ({4'd0, display_row} * {4'd0, input_n}) + {8'd0, display_col};
+                        display_step <= 3'd3;
+                    end
+                    
+                    3'd3: begin // Wait one cycle for memory read
+                        display_value <= mem_rd_data;
+                        display_step <= 3'd4;
+                    end
+                    
+                    3'd4: begin // Send the digit
+                        if (!tx_busy && !tx_start) begin
+                            tx_data <= display_value[3:0] + "0"; // Convert to ASCII
+                            tx_start <= 1'b1;
+                            display_step <= 3'd5;
+                        end
+                    end
+                    
+                    3'd5: begin // Send space or move to next row
+                        if (!tx_busy && !tx_start) begin
+                            if (display_col == input_n - 1) begin
+                                // End of row
+                                display_col <= 4'd0;
+                                if (display_row == input_m - 1) begin
+                                    // All done
+                                    display_step <= 3'd6;
+                                end else begin
+                                    // Next row
+                                    display_row <= display_row + 1'b1;
+                                    display_step <= 3'd0;
+                                end
+                            end else begin
+                                // Send space and continue in same row
+                                tx_data <= 8'h20; // Space
+                                tx_start <= 1'b1;
+                                display_col <= display_col + 1'b1;
+                                display_step <= 3'd2;
+                            end
+                        end
+                    end
+                    
+                    3'd6: begin // Final newline
+                        if (!tx_busy && !tx_start) begin
+                            tx_data <= 8'h0D;
+                            tx_start <= 1'b1;
+                            display_step <= 3'd7;
+                        end
+                    end
+                    
+                    3'd7: begin // Final line feed, then done
+                        if (!tx_busy && !tx_start) begin
+                            tx_data <= 8'h0A;
+                            tx_start <= 1'b1;
+                            sub_state <= DONE;
+                        end
+                    end
+                    
+                    default: display_step <= 3'd0;
+                endcase
             end
             
             DONE: begin
