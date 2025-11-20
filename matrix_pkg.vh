@@ -7,7 +7,7 @@
 `define MATRIX_PKG_VH
 
 // System parameters
-`define CLK_FREQ          20_000_000
+`define CLK_FREQ          100_000_000
 `define BAUD_RATE         115200
 `define MAX_POSSIBLE_DIM  6
 `define MAX_STORAGE_MATRICES 20

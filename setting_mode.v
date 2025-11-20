@@ -15,7 +15,7 @@ module setting_mode #(
     
     // UART receive interface
     input wire [7:0] rx_data,
-    input wire rx_done,
+    input wire rx_valid,
     output reg clear_rx_buffer,
     
     // UART transmit interface

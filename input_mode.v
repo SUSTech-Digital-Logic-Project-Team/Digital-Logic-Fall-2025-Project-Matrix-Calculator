@@ -130,7 +130,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     // 发送确认信息：回显接收到的数据
                     if (!tx_busy) begin
-                        tx_data <= rx_data; // 回显接收到的字符
+                        tx_data <= "M"; // 回显接收到的字符
                         tx_start <= 1'b1;
                     end
                 end
@@ -147,7 +147,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     // 发送确认信息：回显接收到的数据
                     if (!tx_busy) begin
-                        tx_data <= rx_data; // 回显接收到的字符
+                        tx_data <= "N"; // 回显接收到的字符
                         tx_start <= 1'b1;
                     end
                 end
@@ -166,6 +166,10 @@ always @(posedge clk or negedge rst_n) begin
                     alloc_n <= input_n;
                     sub_state <= WAIT_ALLOC;
                 end
+                if (!tx_busy) begin
+                        tx_data <= "L"; // 回显接收到的字符
+                        tx_start <= 1'b1;
+                end
             end
             
             WAIT_ALLOC: begin
@@ -181,6 +185,10 @@ always @(posedge clk or negedge rst_n) begin
                     error_code <= `ERR_NO_SPACE;
                     alloc_req <= 1'b0;
                     sub_state <= ERROR;
+                end
+                if (!tx_busy) begin
+                        tx_data <= "P"; // 回显接收到的字符
+                        tx_start <= 1'b1;
                 end
             end
             
@@ -225,7 +233,7 @@ always @(posedge clk or negedge rst_n) begin
             DONE: begin
                 commit_req <= 1'b0;
                 if (!tx_busy) begin
-                    tx_data <= 8'b01000011;  // Success indicator ('C')
+                    tx_data <= "D";  // Success indicator ('D')
                     tx_start <= 1'b1;
                     sub_state <= IDLE;
                 end
