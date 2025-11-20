@@ -125,6 +125,7 @@ always @(posedge clk or negedge rst_n) begin
                     end else if (rx_data >= "0" && rx_data <= "9") begin
                         // Streaming accumulate: M = M*10 + digit
                         // Optimize multiply-by-10 as shift-add: x*10 = (x<<3) + (x<<1)
+                        
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
                     end
                     // 发送确认信息：回显接收到的数据
