@@ -10,7 +10,7 @@ module matrix_calculator_top_optimized (
     input wire clk,
     input wire rst_n,
     input wire [2:0] dip_sw,
-    input wire btn_confirm,  // ��������
+    input wire btn_confirm,  // 
     input wire btn_back,     // ��������
     input wire uart_rx,
     output wire uart_tx,

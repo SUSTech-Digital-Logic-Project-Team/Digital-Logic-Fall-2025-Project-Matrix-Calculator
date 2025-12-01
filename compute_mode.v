@@ -73,18 +73,37 @@ always @(posedge clk or negedge rst_n) begin
         
         case (sub_state)
             IDLE: begin
-                // Reset op type display on entry
-                selected_op_type <= 4'd0; 
+                selected_op_type <= 4'd0;
+                error_code <= ERR_NONE;
+                res_send_idx <= 8'd0;
+                read_idx <= 8'd0;
+                exec_state <= 4'd0;
                 sub_state <= SELECT_OP;
             end
             
             SELECT_OP: begin
-                // Continuously update OP type based on switches
-                // User toggles switches, sees LED/Seg change, then presses Confirm
-                selected_op_type <= {1'b0, dip_sw}; 
+                case (dip_sw)
+                    3'd1: selected_op_type <= OP_ADD;
+                    3'd2: selected_op_type <= OP_MUL;
+                    3'd3: selected_op_type <= OP_TRANSPOSE;
+                    3'd4: selected_op_type <= OP_DETERMINANT;
+                    default: selected_op_type <= 4'd0;
+                endcase
+
                 
                 if (btn_posedge) begin
-                    sub_state <= SELECT_MATRIX;
+                    
+                    if (selected_op_type == 4'd0 || selected_op_type > OP_DETERMINANT) begin
+                        error_code <= ERR_INVALID_OP;
+                        sub_state <= ERROR_HANDLER;
+                    end else begin
+                        
+                        if (selected_op_type == OP_TRANSPOSE || selected_op_type == OP_DETERMINANT) begin
+                            sub_state <= SELECT_MATRIX1;
+                        end else begin
+                            sub_state <= SELECT_MATRIX1;
+                        end
+                    end
                 end
             end
             
