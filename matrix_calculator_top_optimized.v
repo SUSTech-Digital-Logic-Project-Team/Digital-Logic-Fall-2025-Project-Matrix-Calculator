@@ -63,15 +63,9 @@ wire [3:0] config_max_dim_from_setting, config_max_value_from_setting, config_ma
 reg [3:0] config_max_dim, config_max_value, config_matrices_per_size;
 
 always @(*) begin
-    if (setting_mode_active) begin
-        config_max_dim = config_max_dim_from_setting;
-        config_max_value = config_max_value_from_setting;
-        config_matrices_per_size = config_matrices_per_size_from_setting;
-    end else begin
-        config_max_dim = `DEFAULT_MAX_DIM;
-        config_max_value = `DEFAULT_MAX_VALUE;
-        config_matrices_per_size = `DEFAULT_MATRICES_PER_SIZE;
-    end
+    config_max_dim = config_max_dim_from_setting;
+    config_max_value = config_max_value_from_setting;
+    config_matrices_per_size = config_matrices_per_size_from_setting;
 end
 
 // ========================================
