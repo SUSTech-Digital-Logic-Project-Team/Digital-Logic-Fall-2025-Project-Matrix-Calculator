@@ -33,6 +33,7 @@
 `define ERR_NO_SPACE     4'd3
 `define ERR_INVALID_OP   4'd4
 `define ERR_DIM_MISMATCH 4'd5
+`define ERR_INVALID_CHAR 4'd6
 
 // Operation types
 `define OP_TRANSPOSE  4'd0

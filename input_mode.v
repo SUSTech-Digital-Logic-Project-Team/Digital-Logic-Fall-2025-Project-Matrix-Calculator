@@ -293,7 +293,7 @@ always @(posedge clk or negedge rst_n) begin
                         error_code <= `ERR_NONE;
                     end else begin
                         // Invalid character received (not a digit, not space, not enter)
-                        error_code <= `ERR_VALUE_RANGE; // Or define a new error code like ERR_INVALID_CHAR
+                        error_code <= `ERR_INVALID_CHAR; // Or define a new error code like ERR_INVALID_CHAR
                         if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
                         // Stay in PARSE_DATA
                     end
