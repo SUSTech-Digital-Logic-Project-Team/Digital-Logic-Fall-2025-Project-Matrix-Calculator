@@ -33,7 +33,17 @@ set_property PACKAGE_PIN J3 [get_ports {led_status[2]}]
 set_property PACKAGE_PIN H4 [get_ports {led_status[3]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led_status[*]}]
 
-create_clock -period 50.000 -name sys_clk [get_ports clk]
+set_property PACKAGE_PIN D4 [get_ports {seg_countdown[0]}] 
+set_property PACKAGE_PIN E3 [get_ports {seg_countdown[1]}]
+set_property PACKAGE_PIN D3 [get_ports {seg_countdown[2]}]
+set_property PACKAGE_PIN F4 [get_ports {seg_countdown[3]}]
+set_property PACKAGE_PIN F3 [get_ports {seg_countdown[4]}]
+set_property PACKAGE_PIN E2 [get_ports {seg_countdown[5]}]
+set_property PACKAGE_PIN D2 [get_ports {seg_countdown[6]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {seg_countdown[*]}]
+
+set_property PACKAGE_PIN G6 [get_ports {count_down_select}]
+set_property IOSTANDARD LVCMOS33 [get_ports {count_down_select}]
 
 set_false_path -from [get_ports uart_rx]
 set_false_path -to [get_ports uart_tx]

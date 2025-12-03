@@ -45,9 +45,12 @@ module generate_mode #(
     output reg [ADDR_WIDTH-1:0] mem_wr_addr,
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
     
-    // Error and state output
-    output reg [3:0] error_code,
-    output reg [3:0] sub_state
+    // Error recovery signal
+    input wire timeout_reset,
+
+    // State and Error
+    output reg [3:0] sub_state,
+    output reg [3:0] error_code
 );
 
 // State definitions
@@ -87,26 +90,46 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             WAIT_M: begin
-                if (rx_done) begin
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        gen_m <= rx_data[3:0];
-                        clear_rx_buffer <= 1'b1;
-                        sub_state <= WAIT_N;
+                        if (rx_data[3:0] > config_max_dim || rx_data[3:0] == 0) begin
+                            error_code <= `ERR_DIM_RANGE;
+                            if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                        end else begin
+                            gen_m <= rx_data[3:0];
+                            clear_rx_buffer <= 1'b1;
+                            sub_state <= WAIT_N;
+                            error_code <= `ERR_NONE;
+                        end
                     end else begin
                         clear_rx_buffer <= 1'b1;
+                        error_code <= `ERR_DIM_RANGE;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                     end
                 end
             end
             
             WAIT_N: begin
-                if (rx_done) begin
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        gen_n <= rx_data[3:0];
-                        clear_rx_buffer <= 1'b1;
-                        alloc_req <= 1'b1;
-                        sub_state <= ALLOC;
+                        if (rx_data[3:0] > config_max_dim || rx_data[3:0] == 0) begin
+                            error_code <= `ERR_DIM_RANGE;
+                            if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                        end else begin
+                            gen_n <= rx_data[3:0];
+                            clear_rx_buffer <= 1'b1;
+                            alloc_req <= 1'b1;
+                            sub_state <= ALLOC;
+                            error_code <= `ERR_NONE;
+                        end
                     end else begin
                         clear_rx_buffer <= 1'b1;
+                        error_code <= `ERR_DIM_RANGE;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                     end
                 end
             end

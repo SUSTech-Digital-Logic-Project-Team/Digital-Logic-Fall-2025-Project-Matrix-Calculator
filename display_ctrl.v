@@ -8,7 +8,9 @@ module display_ctrl (
     input wire [3:0] sub_state,
     input wire [3:0] op_type,
     input wire [3:0] error_code,
+    input wire [3:0] countdown_val, // 倒计时数值输入
     output reg [6:0] seg_display,
+    output reg [6:0] seg_countdown, // New port for countdown display
     output reg [3:0] led_status,
     output reg [1:0] seg_select // 改为 output，直接由内部逻辑控制扫描
 );
@@ -23,6 +25,10 @@ module display_ctrl (
     localparam S_3 = 7'b1001111;
     localparam S_4 = 7'b1100110;
     localparam S_5 = 7'b1101101;
+    localparam S_6 = 7'b1111101;
+    localparam S_7 = 7'b0000111;
+    localparam S_8 = 7'b1111111;
+    localparam S_9 = 7'b1101111;
     localparam S_OFF = 7'b0000000;
     
     // 特殊字符定义 (依据 PDF)
@@ -70,7 +76,28 @@ module display_ctrl (
         end
     end
 
-    // 3. 扫描逻辑 (500Hz 左右足够，太慢会闪，太快会鬼影)
+    // 3. 倒计时显示逻辑 (独立端口)
+    always @(*) begin
+        if (error_code != 0) begin
+            case (countdown_val)
+                4'd0: seg_countdown = S_0;
+                4'd1: seg_countdown = S_1;
+                4'd2: seg_countdown = S_2;
+                4'd3: seg_countdown = S_3;
+                4'd4: seg_countdown = S_4;
+                4'd5: seg_countdown = S_5;
+                4'd6: seg_countdown = S_6;
+                4'd7: seg_countdown = S_7;
+                4'd8: seg_countdown = S_8;
+                4'd9: seg_countdown = S_9;
+                default: seg_countdown = S_OFF;
+            endcase
+        end else begin
+            seg_countdown = S_OFF; // 无错误时不显示
+        end
+    end
+
+    // 4. 扫描逻辑 (500Hz 左右足够，太慢会闪，太快会鬼影)
     // 使用 1kHz 扫描
     reg [16:0] scan_cnt;
     always @(posedge clk or negedge rst_n) begin

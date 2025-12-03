@@ -14,11 +14,14 @@ module matrix_calculator_top_optimized (
     input wire btn_back,     // ��������
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display, // ע�⣺display_ctrl �ڲ���������?1?7??? wire ����
+    output wire [6:0] seg_display, // ע⣺display_ctrl ڲ?1?7??? wire 
+    output wire [6:0] seg_countdown, // New port for countdown display
     output wire [3:0] led_status,
-    output wire [1:0] seg_select
+    output wire [1:0] seg_select,
+    output wire count_down_select // New port for countdown display selection
 );
 
+    assign count_down_select = 1'b1; // Enable countdown display (Active High)
     // ========================================
     // 1. �������� (Debouncing) - �����޸�
     // ========================================
@@ -30,12 +33,12 @@ module matrix_calculator_top_optimized (
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_confirm),  // ԭʼ�����źţ�������������ʱΪ0��
-        .btn_pulse(btn_confirm_pulse) // �����������
+        .btn_pulse(btn_confirm_pulse) // �����������??
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_back),     // ԭʼ�����ź�
-        .btn_pulse(btn_back_pulse) // �����������
+        .btn_pulse(btn_back_pulse) // �����������??
     );
 
     // ========================================
@@ -60,15 +63,9 @@ wire [3:0] config_max_dim_from_setting, config_max_value_from_setting, config_ma
 reg [3:0] config_max_dim, config_max_value, config_matrices_per_size;
 
 always @(*) begin
-    if (setting_mode_active) begin
-        config_max_dim = config_max_dim_from_setting;
-        config_max_value = config_max_value_from_setting;
-        config_matrices_per_size = config_matrices_per_size_from_setting;
-    end else begin
-        config_max_dim = `DEFAULT_MAX_DIM;
-        config_max_value = `DEFAULT_MAX_VALUE;
-        config_matrices_per_size = `DEFAULT_MATRICES_PER_SIZE;
-    end
+    config_max_dim = config_max_dim_from_setting;
+    config_max_value = config_max_value_from_setting;
+    config_matrices_per_size = config_matrices_per_size_from_setting;
 end
 
 // ========================================
@@ -117,7 +114,9 @@ wire [3:0] error_code_input, error_code_generate, error_code_display;
 wire [3:0] error_code_compute, error_code_setting;
 reg [3:0] error_code;
 reg error_led;
-reg [25:0] error_timer;
+reg [29:0] error_timer; // Expanded to 30 bits for 7 seconds
+reg error_timeout;
+wire [3:0] countdown_val;
 
 // ========================================
 // Sub-state Signals
@@ -231,6 +230,7 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
 
     always @(*) begin
         main_state_next = main_state;
+        
         case (main_state)
             `MAIN_MENU: begin
                 if (btn_confirm_pulse) begin
@@ -281,22 +281,44 @@ end
 // ========================================
 // Error Handling with Timer
 // ========================================
+reg [3:0] countdown_reg;
+assign countdown_val = countdown_reg;
+
+// Use CLK_FREQ to determine timer thresholds
+localparam TIMER_MAX = 30'd7 * `CLK_FREQ; // 7 seconds
+localparam TIMER_STEP = `CLK_FREQ; // 1 second
+
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         error_led <= 1'b0;
-        error_timer <= 26'd0;
+        error_timer <= 30'd0;
+        error_timeout <= 1'b0;
+        countdown_reg <= 4'd7;
     end else begin
         if (error_code != `ERR_NONE) begin
-            if (error_timer < 26'd50_000_000) begin
+            if (error_timer < TIMER_MAX) begin
                 error_timer <= error_timer + 1'b1;
                 error_led <= 1'b1;
+                error_timeout <= 1'b0;
+                
+                if (error_timer < TIMER_STEP) countdown_reg <= 4'd7;
+                else if (error_timer < TIMER_STEP * 2) countdown_reg <= 4'd6;
+                else if (error_timer < TIMER_STEP * 3) countdown_reg <= 4'd5;
+                else if (error_timer < TIMER_STEP * 4) countdown_reg <= 4'd4;
+                else if (error_timer < TIMER_STEP * 5) countdown_reg <= 4'd3;
+                else if (error_timer < TIMER_STEP * 6) countdown_reg <= 4'd2;
+                else countdown_reg <= 4'd1;
             end else begin
-                error_timer <= 26'd0;
+                error_timer <= 30'd0;
                 error_led <= 1'b0;
+                error_timeout <= 1'b1;
+                countdown_reg <= 4'd0;
             end
         end else begin
-            error_timer <= 26'd0;
+            error_timer <= 30'd0;
             error_led <= 1'b0;
+            error_timeout <= 1'b0;
+            countdown_reg <= 4'd7;
         end
     end
 end
@@ -387,6 +409,7 @@ input_mode input_mode_inst (
     .clk(clk),
     .rst_n(rst_n),
     .mode_active(input_mode_active),
+    .timeout_reset(error_timeout), // Connect timeout reset signal
     .config_max_dim(config_max_dim),
     .config_max_value(config_max_value),
     .rx_data(rx_data),
@@ -445,7 +468,8 @@ generate_mode generate_mode_inst (
     .mem_wr_addr(mem_wr_addr_generate),
     .mem_wr_data(mem_wr_data_generate),
     .error_code(error_code_generate),
-    .sub_state(sub_state_generate)
+    .sub_state(sub_state_generate),
+    .timeout_reset(error_timeout)
 );
 
 // ========================================
@@ -484,7 +508,7 @@ compute_mode compute_mode_inst (
         .mode_active(compute_mode_active),
         .config_max_dim(config_max_dim),
         
-        // ����������������źţ�?1?7??1?7����ԭʼ������
+        // ����������������źţ�???1?7??1?7����ԭʼ������
         .dip_sw(dip_sw),               
         .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
         .selected_op_type(op_type_from_compute), 
@@ -525,7 +549,8 @@ compute_mode compute_mode_inst (
         .mem_wr_data(mem_wr_data_compute),
         
         .error_code(error_code_compute),
-        .sub_state(sub_state_compute)
+        .sub_state(sub_state_compute),
+        .timeout_reset(error_timeout)
     );
 
 // ========================================
@@ -558,12 +583,14 @@ display_ctrl disp_ctrl_inst (
         .rst_n(rst_n),
         .main_state(main_state),
         .sub_state(sub_state),
-        // ���?1?7??? Compute ģʽ����?1?7??? op_type������Ϊ 0
+        // ?1?7??? Compute ģʽ?1?7??? op_typeΪ 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         .error_code(error_code),
+        .countdown_val(countdown_val), // Connect countdown value
         .seg_display(seg_display), // ֱ?1?7??? Output Port
+        .seg_countdown(seg_countdown), // New port for countdown display
         .led_status(led_status),
-        .seg_select(seg_select)    // ֱ������?1?7??? Output Port
+        .seg_select(seg_select)    // ֱ?1?7??? Output Port
     );
 
 
