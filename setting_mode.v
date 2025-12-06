@@ -12,6 +12,7 @@ module setting_mode #(
     input wire clk,
     input wire rst_n,
     input wire mode_active,
+    input wire btn_confirm,
     
     // UART receive interface
     input wire [7:0] rx_data,
@@ -24,7 +25,7 @@ module setting_mode #(
     input wire tx_busy,
     
     // Configuration output
-    output reg [3:0] config_max_dim,
+    output reg [7:0] config_max_dim,
     output reg [3:0] config_max_value,
     output reg [3:0] config_matrices_per_size,
     
@@ -35,16 +36,17 @@ module setting_mode #(
 
 // State definitions
 localparam IDLE = 4'd0, WAIT_MAX_DIM = 4'd1, WAIT_MAX_VAL = 4'd2,
-           WAIT_MAT_PER_SIZE = 4'd3, CONFIRM = 4'd4, DONE = 4'd5;
+           WAIT_MAT_PER_SIZE = 4'd3, CONFIRM = 4'd4, DONE = 4'd5, APPLY = 4'd6;
 
 // Internal configuration
-reg [3:0] cfg_max_dim;
+reg [7:0] cfg_max_dim;
 reg [3:0] cfg_max_value;
 reg [3:0] cfg_matrices_per_size;
 reg [7:0] parse_accum;        // Accumulator for multi-digit number
 
 // Prompt display counter (for message cycling)
 reg [1:0] message_state;
+reg [3:0] print_step;
 localparam MSG_DIM = 2'd0, MSG_VALUE = 2'd1, MSG_MATRICES = 2'd2, MSG_CONFIRM = 2'd3;
 
 always @(posedge clk or negedge rst_n) begin
@@ -61,6 +63,7 @@ always @(posedge clk or negedge rst_n) begin
         error_code <= `ERR_NONE;
         parse_accum <= 8'd0;
         message_state <= MSG_DIM;
+        print_step <= 4'd0;
         clear_rx_buffer <= 1'b0;
     end else if (mode_active) begin
         // Default one-shot signals
@@ -75,6 +78,7 @@ always @(posedge clk or negedge rst_n) begin
                 parse_accum <= 8'd0;
                 error_code <= `ERR_NONE;
                 message_state <= MSG_DIM;
+                print_step <= 4'd0;
                 sub_state <= WAIT_MAX_DIM;
             end
             
@@ -93,13 +97,7 @@ always @(posedge clk or negedge rst_n) begin
                                 if (rx_data >= "0" && rx_data <= "9") begin
                                     // Parse digit: accumulate using multiply-by-10 = (x<<3)+(x<<1)
                                     parse_accum <= (parse_accum << 3) + (parse_accum << 1) + (rx_data - "0");
-                                    clear_rx_buffer <= 1'b1;
-                                    // Echo the digit back
-                                    if (!tx_busy) begin
-                                        tx_data <= rx_data;
-                                        tx_start <= 1'b1;
-                                    end
-                                end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin
+                                end else if (rx_data == 8'h20) begin
                                     // Enter key - confirm the value
                                     if (parse_accum > 0 && parse_accum <= `MAX_POSSIBLE_DIM) begin
                                         cfg_max_dim <= parse_accum[3:0];
@@ -135,13 +133,7 @@ always @(posedge clk or negedge rst_n) begin
                                 if (rx_data >= "0" && rx_data <= "9") begin
                                     // Parse digit
                                     parse_accum <= (parse_accum << 3) + (parse_accum << 1) + (rx_data - "0");
-                                    clear_rx_buffer <= 1'b1;
-                                    // Echo the digit back
-                                    if (!tx_busy) begin
-                                        tx_data <= rx_data;
-                                        tx_start <= 1'b1;
-                                    end
-                                end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin
+                                end else if (rx_data == 8'h20) begin
                                     // Enter key - confirm the value
                                     if (parse_accum > 0 && parse_accum <= 255) begin
                                         cfg_max_value <= parse_accum[3:0];
@@ -177,13 +169,7 @@ always @(posedge clk or negedge rst_n) begin
                                 if (rx_data >= "0" && rx_data <= "9") begin
                                     // Parse digit
                                     parse_accum <= (parse_accum << 3) + (parse_accum << 1) + (rx_data - "0");
-                                    clear_rx_buffer <= 1'b1;
-                                    // Echo the digit back
-                                    if (!tx_busy) begin
-                                        tx_data <= rx_data;
-                                        tx_start <= 1'b1;
-                                    end
-                                end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin
+                                end else if (rx_data == 8'h20) begin
                                     // Enter key - confirm the value
                                     if (parse_accum > 0 && parse_accum <= 20) begin
                                         cfg_matrices_per_size <= parse_accum[3:0];
@@ -205,16 +191,90 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             CONFIRM: begin
-                // Send confirmation message 'S' for Settings Configured
+                // Wait for confirmation button
+                if (btn_confirm) begin
+                    sub_state <= APPLY;
+                    print_step <= 0;
+                end
+            end
+
+            APPLY: begin
+                // Send confirmation message 'S' and echo settings
                 if (!tx_busy && !tx_start) begin
-                    tx_data <= "S";
-                    tx_start <= 1'b1;
-                    // Apply the configuration
-                    config_max_dim <= cfg_max_dim;
-                    config_max_value <= cfg_max_value;
-                    config_matrices_per_size <= cfg_matrices_per_size;
-                    error_code <= `ERR_NONE;
-                    sub_state <= DONE;
+                    case (print_step)
+                        0: begin
+                            // Apply the configuration
+                            config_max_dim <= cfg_max_dim;
+                            config_max_value <= cfg_max_value;
+                            config_matrices_per_size <= cfg_matrices_per_size;
+                            error_code <= `ERR_NONE;
+                            
+                            tx_data <= "S";
+                            tx_start <= 1'b1;
+                            print_step <= 1;
+                        end
+                        1: begin tx_data <= 8'h20; tx_start <= 1'b1; print_step <= 2; end
+                        
+                        // Echo Max Dim (up to 3 digits)
+                        2: begin
+                            if (cfg_max_dim >= 100) begin
+                                tx_data <= (cfg_max_dim / 100) + "0";
+                                tx_start <= 1'b1;
+                            end
+                            print_step <= 3;
+                        end
+                        3: begin
+                            if (cfg_max_dim >= 10) begin
+                                tx_data <= ((cfg_max_dim / 10) % 10) + "0";
+                                tx_start <= 1'b1;
+                            end
+                            print_step <= 4;
+                        end
+                        4: begin
+                            tx_data <= (cfg_max_dim % 10) + "0";
+                            tx_start <= 1'b1;
+                            print_step <= 5;
+                        end
+                        5: begin tx_data <= 8'h20; tx_start <= 1'b1; print_step <= 6; end
+                        
+                        // Echo Max Value (up to 2 digits)
+                        6: begin
+                            if (cfg_max_value >= 10) begin
+                                tx_data <= (cfg_max_value / 10) + "0";
+                                tx_start <= 1'b1;
+                            end
+                            print_step <= 7;
+                        end
+                        7: begin
+                            tx_data <= (cfg_max_value % 10) + "0";
+                            tx_start <= 1'b1;
+                            print_step <= 8;
+                        end
+                        8: begin tx_data <= 8'h20; tx_start <= 1'b1; print_step <= 9; end
+                        
+                        // Echo Matrices Per Size (up to 2 digits)
+                        9: begin
+                            if (cfg_matrices_per_size >= 10) begin
+                                tx_data <= (cfg_matrices_per_size / 10) + "0";
+                                tx_start <= 1'b1;
+                            end
+                            print_step <= 10;
+                        end
+                        10: begin
+                            tx_data <= (cfg_matrices_per_size % 10) + "0";
+                            tx_start <= 1'b1;
+                            print_step <= 11;
+                        end
+                        
+                        // Newline
+                        11: begin tx_data <= 8'h0D; tx_start <= 1'b1; print_step <= 12; end
+                        12: begin tx_data <= 8'h0A; tx_start <= 1'b1; print_step <= 13; end
+                        
+                        13: begin
+                            sub_state <= DONE;
+                            print_step <= 0;
+                        end
+                    endcase
                 end
             end
             

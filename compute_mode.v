@@ -294,11 +294,11 @@ always @(posedge clk or negedge rst_n) begin
                         if (!tx_busy) begin
                             case (print_step)
                                 0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
-                                1: begin tx_data <= " "; tx_start <= 1; print_step <= 2; end
+                                1: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 2; end
                                 2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
-                                3: begin tx_data <= " "; tx_start <= 1; print_step <= 4; end
+                                3: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 4; end
                                 4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
-                                5: begin tx_data <= " "; tx_start <= 1; print_step <= 6; end
+                                5: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 6; end
                                 6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
                                 7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
                                 8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 5'd4; end 
@@ -566,11 +566,11 @@ always @(posedge clk or negedge rst_n) begin
                         if (!tx_busy) begin
                             case (print_step)
                                 0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
-                                1: begin tx_data <= " "; tx_start <= 1; print_step <= 2; end
+                                1: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 2; end
                                 2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
-                                3: begin tx_data <= " "; tx_start <= 1; print_step <= 4; end
+                                3: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 4; end
                                 4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
-                                5: begin tx_data <= " "; tx_start <= 1; print_step <= 6; end
+                                5: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 6; end
                                 6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
                                 7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
                                 8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 6'd48; end 

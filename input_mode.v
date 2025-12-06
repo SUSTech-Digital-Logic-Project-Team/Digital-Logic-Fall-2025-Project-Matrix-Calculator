@@ -277,7 +277,7 @@ always @(posedge clk or negedge rst_n) begin
                             // If space received without digits (e.g. multiple spaces), just ignore.
                         end
                         // If error exists, do nothing (maintain error state)
-                    end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin // Enter
+                    end else if (rx_data == 8'h46) begin // Finish input (ASCII 'F')
                         if (error_code == `ERR_NONE) begin
                             if (digit_received) begin
                                 // Write the pending number

@@ -1,10 +1,10 @@
-# 矩阵计算器 - BRAM优化重构版本
+# 矩阵计算器 on FPGA
 
 ## 项目概述
 
 本项目为对于上一个使用LUT进行储存的版本的BRAM优化版本，由于上一次用LUT综合的时候LUT爆炸了，因此进行了完全重构，使用BRAM储存地址，并且通过Matrix_Manager进行取址，然后通过memory pool访问储存的矩阵。项目基于Verilog 2001标准开发，使用Vivado 2017和Vivado 2022两个版本进行测试、综合。本项目基于Xilinx Artix-7 FPGA工作。
 
-## TODO 
+## TODOs 
 
 - 将LUT储存变成用BRAM存储 √
 - 实现主模式、子模式转换 √
@@ -22,7 +22,6 @@
 ### 核心模块
 - **bram_memory_pool.v** - BRAM专用内存池
   - 同步读写端口设计
-  - 强制BRAM推断属性
   - 12位地址宽度（4K元素）
 
 - **matrix_manager_optimized.v** - 优化的矩阵管理器
@@ -38,7 +37,7 @@
 ### 通信和外设
 - **uart_module.v** - UART收发器（115200 bps）
 - **uart_rx.v, uart_tx.v** - UART收发组件
-- **lfsr_rng.v** - LFSR伪随机数生成器
+- **lfsr_rng.v** - LFSR伪随机数生成器（For Generate Mode）
 - **display_ctrl.v** - 7段显示和LED控制
 
 ### 操作模式模块
@@ -81,61 +80,11 @@
 
 ## 架构设计
 
-### 顶层信号流
-
-```
-┌─────────────┐
-│    UART     │◄──────► EGO1开发板串口
-└──────┬──────┘
-       │
-    ┌──┴────────────────────────────────┐
-    │   Matrix Calculator Top (FSM)     │
-    │  ┌─────────────────────────────┐  │
-    │  │  Mode Multiplexer           │  │
-    │  │  ┌─────────────┐            │  │
-    │  │  │ Input Mode  │            │  │
-    │  │  ├─────────────┤            │  │
-    │  │  │ Generate M. │            │  │
-    │  │  ├─────────────┤            │  │
-    │  │  │ Display M.  │ ─┐         │  │
-    │  │  ├─────────────┤  │ BRAM    │  │
-    │  │  │ Compute M.  │ ─┼◄────►┌──┼─┤
-    │  │  ├─────────────┤  │ Pool │  │ │
-    │  │  │ Setting M.  │ ─┘      └──┼─┤
-    │  │  └─────────────┘            │  │
-    │  └─────────────────────────────┘  │
-    │                                   │
-    │  ┌──────────────────────────────┐ │
-    │  │ Matrix Manager (Metadata)    │ │
-    │  │ ┌────────────────────────┐   │ │
-    │  │ │ Directory (20 slots)   │   │ │
-    │  │ │ • Valid flags          │   │ │
-    │  │ │ • Dimensions (M×N)     │   │ │
-    │  │ │ • Start addresses      │   │ │
-    │  │ │ • Element counts       │   │ │
-    │  │ └────────────────────────┘   │ │
-    │  └──────────────────────────────┘ │
-    │                                   │
-    │  ┌──────────────────────────────┐ │
-    │  │ Control Logic & Multiplexers │ │
-    │  │ • Allocation FSM             │ │
-    │  │ • Address routing            │ │
-    │  │ • R/W arbitration            │ │
-    │  └──────────────────────────────┘ │
-    └───────────────────────────────────┘
-            │                   │
-            ▼                   ▼
-    ┌─────────────┐      ┌──────────────┐
-    │   LFSR RNG  │      │ Display Ctrl │
-    │  16位伪随机 │      │   7-Seg+LEDs │
-    └─────────────┘      └──────────────┘
-```
-
 ## 主要数据通路
 
 ### 写入路径
 1. UART接收数据 → input_mode/generate_mode
-2. 数据验证 → 错误检查
+2. 数据验证 → 错误检查（如有错误，进入倒计时）
 3. 向matrix_manager请求地址 → alloc_slot + alloc_addr
 4. 写入BRAM → mem_wr_en + mem_wr_addr + mem_wr_data
 5. 向matrix_manager提交 → commit_req确保元数据一致
@@ -146,17 +95,7 @@
 3. 通过BRAM读取数据 → mem_rd_addr逐个读取
 4. 处理或输出结果
 
-### 
-
 ## 许可证
 
 本项目采用MIT协议。
-
----
-
-**重构版本**：1.0  
-**重构日期**：2025年11月18日  
-**Vivado版本**：2017  
-**Verilog标准**：IEEE 1364-2005  
-**状态**：✓ 语法验证通过，可用于综合  
 
