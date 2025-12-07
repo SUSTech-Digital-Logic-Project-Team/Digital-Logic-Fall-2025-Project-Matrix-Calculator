@@ -2,9 +2,14 @@
 
 ## 项目概述
 
-本项目为对于上一个使用LUT进行储存的版本的BRAM优化版本，由于上一次用LUT综合的时候LUT爆炸了，因此进行了完全重构，使用BRAM储存地址，并且通过Matrix_Manager进行取址，然后通过memory pool访问储存的矩阵。项目基于Verilog 2001标准开发，使用Vivado 2017和Vivado 2022两个版本进行测试、综合。本项目基于Xilinx Artix-7 FPGA工作。
+本项目为南方科技大学2025年秋数字逻辑课程项目-可交互矩阵计算器的代码仓库。本仓库包含了所有的源文件、用到的语法检查脚本、项目架构文件和原图片（用于课程提交）和拟采用的图形界面文件。本项目使用MIT协议开源。
 
-## TODOs 
+**人工智能使用声明**：
+- 本项目大量采用人工智能生成重复代码-人工调优debug的模式进行，由于项目中手动定义的宏以及各种状态机的设置过于繁琐，我们通常使用人工智能协助进行编写。在关键状态转移、计算流程中，主要采用人工手动编写。尤其是各类多路选择和模块连接的部分，由于不堪其扰，我们采用了人工智能协助连接-代码编写者review的模式，确保连线完全正确，同时避免了人工连接导致的各类问题。
+- 本项目中，人工智能助手提供的使用BRAM优化，避免LUT综合爆炸的建议非常有效。我们基于上一个项目版本（使用DRAM）使用人工智能进行了完全重构并且debug。
+- 本项目充分体现了人工智能的局限性：在大量的复杂Verilog中，人工智能助手往往会在完全不存在问题的地方过度检查，并且最后输出的结果往往不能解决问题，需要人工手动添加断点测试排除问题。
+
+## TODOs（项目开发进程） 
 
 - 将LUT储存变成用BRAM存储 √
 - 实现主模式、子模式转换 √
@@ -15,89 +20,41 @@
 - 实现随机生成模式 √
 - 实现计算模式和若干计算类型 √
 - 完善设置模式 √
-- 设计展示模式
+- 设计展示模式 (暂时留存不做了)
 - 设计卷积操作 √
 - 实现错误输入倒计时+再次正确输入恢复功能 √
 
-## 文件清单
+## 项目架构
 
-### 核心模块
-- **bram_memory_pool.v** - BRAM专用内存池
-  - 同步读写端口设计
-  - 12位地址宽度（4K元素）
+### 模式模块
 
-- **matrix_manager_optimized.v** - 优化的矩阵管理器
-  - 元数据存储（分布式RAM）
-  - 自动地址分配（连续地址分配）
-  - 组合逻辑查询接口
+- Matrix Calculator Top Optimized （用Bram重构以后的顶层模块）
+- Compute Mode （计算模式）
+- Input Mode （输入模式）
+- Generate Mode （生成模式）
+- Display Mode （展示模式，用于展示已有所有矩阵，未完成）
+- Setting Mode （设置模式，允许用户自定义最大矩阵维度、值的大小、单个维度矩阵可存储的数量）
 
-- **matrix_calculator_top_optimized.v** - 顶层模块
-  - 完整的子模块实例化
-  - 信号多路选择和路由
-  - 主状态机控制
+### 计算模块
 
-### 通信和外设
-- **uart_module.v** - UART收发器（115200 bps）
-- **uart_rx.v, uart_tx.v** - UART收发组件
-- **lfsr_rng.v** - LFSR伪随机数生成器（For Generate Mode）
-- **display_ctrl.v** - 7段显示和LED控制
+- add （加法模式）
+- transpose （转置模式）
+- scalar_mul （标量乘法模式）
+- mul （矩阵乘法模式）
+- conv （卷积模式，具有特殊的工作流程，仅支持$3\times 3$卷积核）
 
-### 操作模式模块
-- **input_mode.v** - 矩阵输入模式
-  - UART接收数据
-  - 参数验证
-  - BRAM写入
+### UART模块
 
-- **generate_mode.v** - 随机矩阵生成
-  - 使用LFSR生成数据
-  - 自动填充BRAM
+- uart_module
+- uart_rx
+- uart_tx
 
-- **display_mode.v** - 矩阵显示模式
-  - UART输出矩阵内容
-  - 多矩阵支持
+### 功能模块
 
-- **compute_mode.v** - 计算模式框架
-  - 矩阵操作执行框架
-  - 支持多种运算类型
+- display control （数码管和LED控制）
+- ifsr_rng （多项式随机数生成器）
+- matrix package （参数宏定义）
+- bram memory （内存读写模块）
+- matrix manager （矩阵维度信息、地址信息管理器，支持自动寻址查找）
 
-- **setting_mode.v** - 系统设置模式
-  - 配置参数调整
-  - 系统初始化
-
-### 配置和工具（不要调这个包里的参数！会发生不幸）
-- **matrix_pkg.vh** - 系统参数和常量定义包
-  
-## 项目规格
-
-| 参数 | 值 |
-|------|-----|
-| 目标FPGA | Xilinx Artix-7 (XC7A35T) |
-| 开发板 | EGO1 |
-| 时钟频率 | 100 MHz |
-| UART波特率 | 115200 bps |
-| BRAM容量 | 4096个4位元素 |
-| 最大矩阵数 | 20个 |
-| 最大矩阵维度 | 6×6（可配置） |
-| 数据宽度 | 4位（0-15） |
-
-## 架构设计
-
-## 主要数据通路
-
-### 写入路径
-1. UART接收数据 → input_mode/generate_mode
-2. 数据验证 → 错误检查（如有错误，进入倒计时）
-3. 向matrix_manager请求地址 → alloc_slot + alloc_addr
-4. 写入BRAM → mem_wr_en + mem_wr_addr + mem_wr_data
-5. 向matrix_manager提交 → commit_req确保元数据一致
-
-### 读取路径
-1. 应用（display/compute）查询矩阵 → query_slot
-2. matrix_manager返回元数据 → 地址、维度、元素数
-3. 通过BRAM读取数据 → mem_rd_addr逐个读取
-4. 处理或输出结果
-
-## 许可证
-
-本项目采用MIT协议。
 
