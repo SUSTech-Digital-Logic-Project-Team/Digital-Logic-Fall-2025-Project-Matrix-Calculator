@@ -569,7 +569,7 @@ always @(posedge clk or negedge rst_n) begin
                                 end else if (selected_op_type == OP_CONV) begin
                                     // For Convolution, kernel is fixed 3x3
                                     // Wait for rx_done to clear, then go to select kernel
-                                    sel_step <= 6'd70;
+                                    sel_step <= 7'd70;
                                 end else begin
                                     sel_step <= 6'd42; // Wait RX low then 16
                                 end
@@ -1141,11 +1141,11 @@ always @(posedge clk or negedge rst_n) begin
                     // ==========================================
                     // Convolution: Select 3x3 Kernel
                     // ==========================================
-                    6'd70: begin // Wait for rx_done to clear before listing kernels
+                    7'd70: begin // Wait for rx_done to clear before listing kernels
                         if (!rx_done) sel_step <= 6'd62;
                     end
                     
-                    6'd62: begin // Init: List all 3x3 matrices
+                    7'd62: begin // Init: List all 3x3 matrices
                         target_m <= 5'd3;
                         target_n <= 5'd3;
                         scan_slot <= 0;
@@ -1153,65 +1153,65 @@ always @(posedge clk or negedge rst_n) begin
                         sel_step <= 6'd63;
                     end
                     
-                    6'd63: begin // Query slot for 3x3 kernel
+                    7'd63: begin // Query slot for 3x3 kernel
                         query_slot <= scan_slot[3:0];
-                        sel_step <= 6'd64;
+                        sel_step <= 7'd64;
                     end
                     
-                    6'd64: begin // Check if 3x3 and print
+                    7'd64: begin // Check if 3x3 and print
                         if (query_valid && query_m == 5'd3 && query_n == 5'd3) begin
                             print_addr <= query_addr;
                             print_r <= 0;
                             print_c <= 0;
-                            sel_step <= 6'd65; // Print index
+                            sel_step <= 7'd65; // Print index
                         end else begin
-                            if (scan_slot == 15) sel_step <= 6'd67; // Done listing, wait selection
+                            if (scan_slot == 15) sel_step <= 7'd67; // Done listing, wait selection
                             else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 6'd63;
+                                sel_step <= 7'd63;
                             end
                         end
                     end
                     
-                    6'd65: begin // Print kernel index
+                    7'd65: begin // Print kernel index
                         if (!tx_busy && !tx_pending) begin
                             tx_data <= match_idx + "0"; 
                             tx_start <= 1;
                             tx_pending <= 1;
-                            sel_step <= 6'd66;
+                            sel_step <= 7'd66;
                         end
                     end
                     
-                    6'd66: begin // Send CR after kernel index
+                    7'd66: begin // Send CR after kernel index
                         if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0D;
                             tx_start <= 1;
                             tx_pending <= 1;
-                            sel_step <= 6'd71;
+                            sel_step <= 7'd71;
                         end
                     end
                     
-                    6'd71: begin // Send LF, then continue listing
+                    7'd71: begin // Send LF, then continue listing
                         if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A;
                             tx_start <= 1;
                             tx_pending <= 1;
                             match_idx <= match_idx + 1;
-                            if (scan_slot == 15) sel_step <= 6'd67;
+                            if (scan_slot == 15) sel_step <= 7'd67;
                             else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 6'd63;
+                                sel_step <= 7'd63;
                             end
                         end
                     end
                     
-                    6'd67: begin // Wait for kernel selection
+                    7'd67: begin // Wait for kernel selection
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
                                 user_sel_idx <= rx_data - "0";
                                 scan_slot <= 0;
                                 match_idx <= 1;
-                                sel_step <= 6'd68;
+                                sel_step <= 7'd68;
                                 error_code <= `ERR_NONE;
                             end else begin
                                 error_code <= `ERR_VALUE_RANGE;
@@ -1220,12 +1220,12 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    6'd68: begin // Find kernel slot
+                    7'd68: begin // Find kernel slot
                         query_slot <= scan_slot[3:0];
-                        sel_step <= 6'd69;
+                        sel_step <= 7'd69;
                     end
                     
-                    6'd69: begin // Match kernel
+                    7'd69: begin // Match kernel
                         if (query_valid && query_m == 5'd3 && query_n == 5'd3) begin
                             if (match_idx == user_sel_idx) begin
                                 op2_slot <= scan_slot[3:0];
@@ -1237,19 +1237,19 @@ always @(posedge clk or negedge rst_n) begin
                                 match_idx <= match_idx + 1;
                                 if (scan_slot == 15) begin
                                     scan_slot <= 0;
-                                    sel_step <= 6'd67;
+                                    sel_step <= 7'd67;
                                 end else begin
                                     scan_slot <= scan_slot + 1;
-                                    sel_step <= 6'd68;
+                                    sel_step <= 7'd68;
                                 end
                             end
                         end else begin
                             if (scan_slot == 15) begin
                                 scan_slot <= 0;
-                                sel_step <= 6'd67;
+                                sel_step <= 7'd67;
                             end else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 6'd68;
+                                sel_step <= 7'd68;
                             end
                         end
                     end
