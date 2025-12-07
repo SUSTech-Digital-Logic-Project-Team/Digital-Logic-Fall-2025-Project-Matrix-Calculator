@@ -1191,16 +1191,85 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    7'd71: begin // Send LF, then continue listing
+                    7'd71: begin // Send LF, then print kernel content
                         if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A;
                             tx_start <= 1;
                             tx_pending <= 1;
-                            match_idx <= match_idx + 1;
-                            if (scan_slot == 15) sel_step <= 7'd67;
-                            else begin
-                                scan_slot <= scan_slot + 1;
-                                sel_step <= 7'd63;
+                            print_r <= 0;
+                            print_c <= 0;
+                            sel_step <= 7'd72; // Go to print kernel content
+                        end
+                    end
+                    
+                    7'd72: begin // Read kernel element
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * 3) + print_c;
+                        sel_step <= 7'd73;
+                    end
+                    
+                    7'd73: begin // Wait read
+                        sel_step <= 7'd74;
+                        print_step <= 0;
+                    end
+                    
+                    7'd74: begin // Send kernel element
+                        if (!tx_busy && !tx_pending) begin
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 7'd75; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 7'd75; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                sel_step <= 7'd75;
+                            end
+                        end
+                    end
+                    
+                    7'd75: begin // Check kernel row end
+                        if (print_c == 2) begin // 3x3 kernel, col 0,1,2
+                            if (!tx_busy && !tx_pending) begin
+                                tx_data <= 8'h0D; // CR
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                sel_step <= 7'd76;
+                            end
+                        end else begin
+                            if (!tx_busy && !tx_pending) begin
+                                tx_data <= " "; // Space
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                print_c <= print_c + 1;
+                                sel_step <= 7'd72;
+                            end
+                        end
+                    end
+                    
+                    7'd76: begin // Send LF after kernel row
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            print_c <= 0;
+                            if (print_r == 2) begin // Done printing this kernel
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) sel_step <= 7'd67; // Done listing all
+                                else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 7'd63; // Next kernel
+                                end
+                            end else begin
+                                print_r <= print_r + 1;
+                                sel_step <= 7'd72;
                             end
                         end
                     end
@@ -1232,7 +1301,8 @@ always @(posedge clk or negedge rst_n) begin
                                 // Restore image dimensions for result
                                 target_m <= op1_m;
                                 target_n <= op1_n;
-                                sel_step <= 6'd25; // Print Op1 then Op2 (kernel)
+                                // Kernel already printed during listing, go directly to confirm
+                                sel_step <= 6'd20;
                             end else begin
                                 match_idx <= match_idx + 1;
                                 if (scan_slot == 15) begin

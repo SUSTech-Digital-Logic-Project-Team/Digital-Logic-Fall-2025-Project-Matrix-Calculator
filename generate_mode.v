@@ -57,7 +57,8 @@ module generate_mode #(
 localparam IDLE = 4'd0, WAIT_M = 4'd1, WAIT_N = 4'd2, 
            ALLOC = 4'd3, GEN_LATCH = 4'd4, SEND_VAL = 4'd5, 
            SEND_SPACE = 4'd6, SEND_NEWLINE = 4'd7, 
-           COMMIT = 4'd8, DONE = 4'd9;
+           COMMIT = 4'd8, DONE = 4'd9,
+           WAIT_M_CONT = 4'd10, WAIT_N_CONT = 4'd11;  // States for multi-digit input
 
 // Internal state
 reg [4:0] gen_m, gen_n;       // Extended to 5 bits for dim up to 16
@@ -66,6 +67,7 @@ reg [ADDR_WIDTH-1:0] gen_addr;
 reg [3:0] gen_slot;
 reg [3:0] latched_val;
 reg [4:0] col_count;          // Extended to 5 bits for dim up to 16
+reg [4:0] input_accum;        // Accumulator for multi-digit input (0-31)
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -77,6 +79,7 @@ always @(posedge clk or negedge rst_n) begin
         error_code <= `ERR_NONE;
         clear_rx_buffer <= 1'b0;
         col_count <= 4'd0;
+        input_accum <= 5'd0;
     end else if (mode_active) begin
         tx_start <= 1'b0;
         alloc_req <= 1'b0;
@@ -87,6 +90,7 @@ always @(posedge clk or negedge rst_n) begin
         case (sub_state)
             IDLE: begin
                 sub_state <= WAIT_M;
+                input_accum <= 5'd0;
             end
             
             WAIT_M: begin
@@ -94,19 +98,50 @@ always @(posedge clk or negedge rst_n) begin
                     sub_state <= IDLE;
                 end else if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        if (rx_data[3:0] > config_max_dim || rx_data[3:0] == 0) begin
+                        // First digit received, store it and wait for more or terminator
+                        input_accum <= (rx_data - "0");
+                        clear_rx_buffer <= 1'b1;
+                        sub_state <= WAIT_M_CONT;
+                        error_code <= `ERR_NONE;
+                    end else begin
+                        clear_rx_buffer <= 1'b1;
+                        error_code <= `ERR_DIM_RANGE;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                    end
+                end
+            end
+            
+            WAIT_M_CONT: begin
+                // Continue reading M: expect more digits or terminator (space/enter)
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
+                    if (rx_data >= "0" && rx_data <= "9") begin
+                        // Another digit: accumulate (input_accum * 10 + new_digit)
+                        input_accum <= (input_accum * 10) + (rx_data - "0");
+                        clear_rx_buffer <= 1'b1;
+                        // Stay in WAIT_M_CONT for potential more digits
+                    end else if (rx_data == " " || rx_data == 8'h0D || rx_data == 8'h0A) begin
+                        // Terminator received: validate and move to WAIT_N
+                        if (input_accum > config_max_dim || input_accum == 0) begin
                             error_code <= `ERR_DIM_RANGE;
                             if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            input_accum <= 5'd0;
+                            sub_state <= WAIT_M;
                         end else begin
-                            gen_m <= rx_data[3:0];
+                            gen_m <= input_accum;
+                            input_accum <= 5'd0;
                             clear_rx_buffer <= 1'b1;
                             sub_state <= WAIT_N;
                             error_code <= `ERR_NONE;
                         end
                     end else begin
+                        // Invalid character
                         clear_rx_buffer <= 1'b1;
                         error_code <= `ERR_DIM_RANGE;
                         if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                        input_accum <= 5'd0;
+                        sub_state <= WAIT_M;
                     end
                 end
             end
@@ -116,20 +151,54 @@ always @(posedge clk or negedge rst_n) begin
                     sub_state <= IDLE;
                 end else if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        if (rx_data[3:0] > config_max_dim || rx_data[3:0] == 0) begin
+                        // First digit received, store it and wait for more or terminator
+                        input_accum <= (rx_data - "0");
+                        clear_rx_buffer <= 1'b1;
+                        sub_state <= WAIT_N_CONT;
+                        error_code <= `ERR_NONE;
+                    end else if (rx_data == " " || rx_data == 8'h0D || rx_data == 8'h0A) begin
+                        // Skip leading whitespace
+                        clear_rx_buffer <= 1'b1;
+                    end else begin
+                        clear_rx_buffer <= 1'b1;
+                        error_code <= `ERR_DIM_RANGE;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                    end
+                end
+            end
+            
+            WAIT_N_CONT: begin
+                // Continue reading N: expect more digits or terminator (space/enter)
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
+                    if (rx_data >= "0" && rx_data <= "9") begin
+                        // Another digit: accumulate
+                        input_accum <= (input_accum * 10) + (rx_data - "0");
+                        clear_rx_buffer <= 1'b1;
+                        // Stay in WAIT_N_CONT
+                    end else if (rx_data == " " || rx_data == 8'h0D || rx_data == 8'h0A) begin
+                        // Terminator received: validate and move to ALLOC
+                        if (input_accum > config_max_dim || input_accum == 0) begin
                             error_code <= `ERR_DIM_RANGE;
                             if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            input_accum <= 5'd0;
+                            sub_state <= WAIT_N;
                         end else begin
-                            gen_n <= rx_data[3:0];
+                            gen_n <= input_accum;
+                            input_accum <= 5'd0;
                             clear_rx_buffer <= 1'b1;
                             alloc_req <= 1'b1;
                             sub_state <= ALLOC;
                             error_code <= `ERR_NONE;
                         end
                     end else begin
+                        // Invalid character
                         clear_rx_buffer <= 1'b1;
                         error_code <= `ERR_DIM_RANGE;
                         if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                        input_accum <= 5'd0;
+                        sub_state <= WAIT_N;
                     end
                 end
             end
