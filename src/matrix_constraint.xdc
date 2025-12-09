@@ -42,8 +42,9 @@ set_property PACKAGE_PIN E2 [get_ports {seg_countdown[5]}]
 set_property PACKAGE_PIN D2 [get_ports {seg_countdown[6]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {seg_countdown[*]}]
 
-set_property PACKAGE_PIN G6 [get_ports {count_down_select}]
-set_property IOSTANDARD LVCMOS33 [get_ports {count_down_select}]
+set_property PACKAGE_PIN G6 [get_ports {count_down_select[0]}]
+set_property PACKAGE_PIN E1 [get_ports {count_down_select[1]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {count_down_select[*]}]
 
 set_false_path -from [get_ports uart_rx]
 set_false_path -to [get_ports uart_tx]

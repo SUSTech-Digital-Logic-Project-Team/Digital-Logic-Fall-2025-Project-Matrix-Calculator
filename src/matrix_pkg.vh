@@ -16,6 +16,9 @@
 `define DEFAULT_MAX_DIM   5
 `define DEFAULT_MAX_VALUE 9
 `define DEFAULT_MATRICES_PER_SIZE 3
+`define DEFAULT_ERROR_SECONDS 10
+`define MIN_ERROR_SECONDS 5
+`define MAX_ERROR_SECONDS 15
 `define ELEMENT_WIDTH     8
 
 // Main state machine states

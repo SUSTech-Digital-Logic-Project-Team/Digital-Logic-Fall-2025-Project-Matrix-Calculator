@@ -61,8 +61,14 @@ module matrix_op_conv #(
                 S_IDLE: begin
                     done <= 0;
                     if (start) begin
-                        i <= 0; j <= 0;
-                        state <= S_INIT_PIXEL;
+                        // For valid-only convolution, need at least 3x3 input
+                        if (dim_m < 3 || dim_n < 3) begin
+                            state <= S_DONE;
+                        end else begin
+                            i <= 1; // start from row 1 (skip top border)
+                            j <= 1; // start from col 1 (skip left border)
+                            state <= S_INIT_PIXEL;
+                        end
                     end
                 end
                 
@@ -73,22 +79,12 @@ module matrix_op_conv #(
                 end
                 
                 S_CHECK_BOUNDS: begin
-                    // Calculate neighbor coordinates (centered at i,j)
-                    // Kernel is 3x3. Center is (1,1).
-                    // Offset: -1, 0, +1
-                    // row_idx = i + ki - 1
-                    // col_idx = j + kj - 1
+                    // Valid-only convolution: i,j are already away from borders
                     row_idx = {2'b0, i} + {2'b0, ki} - 6'd1;
                     col_idx = {2'b0, j} + {2'b0, kj} - 6'd1;
-                    
-                    if (row_idx >= 0 && row_idx < dim_m && col_idx >= 0 && col_idx < dim_n) begin
-                        state <= S_READ_A;
-                    end else begin
-                        // Out of bounds, treat value as 0, skip read/mac
-                        state <= S_NEXT_KERNEL;
-                    end
+                    state <= S_READ_A;
                 end
-                
+
                 S_READ_A: begin
                     mem_rd_en <= 1;
                     mem_rd_addr <= addr_op1 + (row_idx[3:0] * dim_n) + col_idx[3:0];
@@ -137,16 +133,17 @@ module matrix_op_conv #(
                 
                 S_WRITE: begin
                     mem_wr_en <= 1;
-                    mem_wr_addr <= addr_res + (i * dim_n) + j;
+                    // Output matrix size is (dim_m-2) x (dim_n-2), address uses zero-based output indices
+                    mem_wr_addr <= addr_res + ((i - 1) * (dim_n - 2)) + (j - 1);
                     mem_wr_data <= acc[7:0];
                     state <= S_NEXT_PIXEL;
                 end
-                
+
                 S_NEXT_PIXEL: begin
                     mem_wr_en <= 0;
-                    if (j == dim_n - 1) begin
-                        j <= 0;
-                        if (i == dim_m - 1) begin
+                    if (j == dim_n - 2) begin
+                        j <= 1;
+                        if (i == dim_m - 2) begin
                             state <= S_DONE;
                         end else begin
                             i <= i + 1;

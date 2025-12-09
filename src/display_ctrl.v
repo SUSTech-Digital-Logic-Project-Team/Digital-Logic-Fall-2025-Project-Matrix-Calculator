@@ -8,11 +8,13 @@ module display_ctrl (
     input wire [3:0] sub_state,
     input wire [3:0] op_type,
     input wire [3:0] error_code,
-    input wire [3:0] countdown_val, // 倒计时数值输入
+    input wire [3:0] countdown_tens, // 倒计时十位
+    input wire [3:0] countdown_ones, // 倒计时个位
     output reg [6:0] seg_display,
     output reg [6:0] seg_countdown, // New port for countdown display
     output reg [3:0] led_status,
-    output reg [1:0] seg_select // 改为 output，直接由内部逻辑控制扫描
+    output reg [1:0] seg_select, // 改为 output，直接由内部逻辑控制扫描
+    output reg [1:0] count_down_select // 倒计时数码管位选
 );
 
     // Segments: GFEDCBA
@@ -42,6 +44,8 @@ module display_ctrl (
 
     reg [6:0] disp_data_mode;
     reg [6:0] disp_data_op;
+    reg [6:0] disp_countdown_tens;
+    reg [6:0] disp_countdown_ones;
 
     // 1. 解码主模式 (Digit 1 - 左侧)
     always @(*) begin
@@ -76,25 +80,35 @@ module display_ctrl (
         end
     end
 
-    // 3. 倒计时显示逻辑 (独立端口)
+    // 3. 倒计时显示逻辑 (双位数码管)
     always @(*) begin
-        if (error_code != 0) begin
-            case (countdown_val)
-                4'd0: seg_countdown = S_0;
-                4'd1: seg_countdown = S_1;
-                4'd2: seg_countdown = S_2;
-                4'd3: seg_countdown = S_3;
-                4'd4: seg_countdown = S_4;
-                4'd5: seg_countdown = S_5;
-                4'd6: seg_countdown = S_6;
-                4'd7: seg_countdown = S_7;
-                4'd8: seg_countdown = S_8;
-                4'd9: seg_countdown = S_9;
-                default: seg_countdown = S_OFF;
-            endcase
-        end else begin
-            seg_countdown = S_OFF; // 无错误时不显示
-        end
+        case (countdown_tens)
+            4'd0: disp_countdown_tens = S_0;
+            4'd1: disp_countdown_tens = S_1;
+            4'd2: disp_countdown_tens = S_2;
+            4'd3: disp_countdown_tens = S_3;
+            4'd4: disp_countdown_tens = S_4;
+            4'd5: disp_countdown_tens = S_5;
+            4'd6: disp_countdown_tens = S_6;
+            4'd7: disp_countdown_tens = S_7;
+            4'd8: disp_countdown_tens = S_8;
+            4'd9: disp_countdown_tens = S_9;
+            default: disp_countdown_tens = S_OFF;
+        endcase
+
+        case (countdown_ones)
+            4'd0: disp_countdown_ones = S_0;
+            4'd1: disp_countdown_ones = S_1;
+            4'd2: disp_countdown_ones = S_2;
+            4'd3: disp_countdown_ones = S_3;
+            4'd4: disp_countdown_ones = S_4;
+            4'd5: disp_countdown_ones = S_5;
+            4'd6: disp_countdown_ones = S_6;
+            4'd7: disp_countdown_ones = S_7;
+            4'd8: disp_countdown_ones = S_8;
+            4'd9: disp_countdown_ones = S_9;
+            default: disp_countdown_ones = S_OFF;
+        endcase
     end
 
     // 4. 扫描逻辑 (500Hz 左右足够，太慢会闪，太快会鬼影)
@@ -117,6 +131,25 @@ module display_ctrl (
                 seg_display = disp_data_op;
             end
         endcase
+    end
+
+    // 倒计时两位扫描（使用更快的位选避免闪烁）
+    always @(*) begin
+        if (error_code != 0) begin
+            case (scan_cnt[15])
+                1'b0: begin
+                    count_down_select = 2'b10; // 十位
+                    seg_countdown = disp_countdown_tens;
+                end
+                1'b1: begin
+                    count_down_select = 2'b01; // 个位
+                    seg_countdown = disp_countdown_ones;
+                end
+            endcase
+        end else begin
+            count_down_select = 2'b00;
+            seg_countdown = S_OFF;
+        end
     end
 
     // LED 状态
