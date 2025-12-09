@@ -18,10 +18,10 @@ module matrix_calculator_top_optimized (
     output wire [6:0] seg_countdown, // New port for countdown display
     output wire [3:0] led_status,
     output wire [1:0] seg_select,
-    output wire count_down_select // New port for countdown display selection
+    output wire [1:0] count_down_select // 2-bit one-hot code for countdown digit selection
 );
 
-    assign count_down_select = 1'b1; // Enable countdown display (Active High)
+    // count_down_select is now driven by display_ctrl module
     // ========================================
     // 1. �������� (Debouncing) - �����޸�
     // ========================================
@@ -58,14 +58,17 @@ module matrix_calculator_top_optimized (
 // Configuration Parameters
 // ========================================
 wire [4:0] config_max_dim_from_setting, config_max_value_from_setting, config_matrices_per_size_from_setting;
+wire [4:0] config_countdown_from_setting;
 
 // Use setting values when in SETTING mode, otherwise use defaults
 reg [4:0] config_max_dim, config_max_value, config_matrices_per_size;
+reg [4:0] config_countdown;
 
 always @(*) begin
     config_max_dim = config_max_dim_from_setting;
     config_max_value = config_max_value_from_setting;
     config_matrices_per_size = config_matrices_per_size_from_setting;
+    config_countdown = config_countdown_from_setting;
 end
 
 // ========================================
@@ -116,7 +119,7 @@ reg [3:0] error_code;
 reg error_led;
 reg [29:0] error_timer; // Expanded to 30 bits for 7 seconds
 reg error_timeout;
-wire [3:0] countdown_val;
+wire [4:0] countdown_val; // Extended to 5 bits for two-digit countdown (5-15)
 
 // ========================================
 // Sub-state Signals
@@ -280,46 +283,72 @@ always @(*) begin
 end
 
 // ========================================
-// Error Handling with Timer
+// Error Handling with Timer (Configurable Countdown: 5-15 seconds)
 // ========================================
-reg [3:0] countdown_reg;
+reg [4:0] countdown_reg; // Extended to 5 bits for two-digit display
 assign countdown_val = countdown_reg;
 
 // Use CLK_FREQ to determine timer thresholds
-localparam TIMER_MAX = 30'd7 * `CLK_FREQ; // 7 seconds
+// TIMER_MAX is now dynamically calculated based on config_countdown
 localparam TIMER_STEP = `CLK_FREQ; // 1 second
+wire [33:0] timer_max_dynamic = config_countdown * `CLK_FREQ; // Dynamic max based on config
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         error_led <= 1'b0;
         error_timer <= 30'd0;
         error_timeout <= 1'b0;
-        countdown_reg <= 4'd7;
+        countdown_reg <= 5'd10; // Default 10 seconds
     end else begin
         if (error_code != `ERR_NONE) begin
-            if (error_timer < TIMER_MAX) begin
+            if (error_timer < timer_max_dynamic[29:0]) begin
                 error_timer <= error_timer + 1'b1;
                 error_led <= 1'b1;
                 error_timeout <= 1'b0;
                 
-                if (error_timer < TIMER_STEP) countdown_reg <= 4'd7;
-                else if (error_timer < TIMER_STEP * 2) countdown_reg <= 4'd6;
-                else if (error_timer < TIMER_STEP * 3) countdown_reg <= 4'd5;
-                else if (error_timer < TIMER_STEP * 4) countdown_reg <= 4'd4;
-                else if (error_timer < TIMER_STEP * 5) countdown_reg <= 4'd3;
-                else if (error_timer < TIMER_STEP * 6) countdown_reg <= 4'd2;
-                else countdown_reg <= 4'd1;
+                // Calculate countdown value dynamically based on elapsed time
+                // countdown_reg shows remaining seconds (supports 5-15)
+                if (error_timer < TIMER_STEP) 
+                    countdown_reg <= config_countdown;
+                else if (error_timer < TIMER_STEP * 2) 
+                    countdown_reg <= (config_countdown >= 2) ? config_countdown - 5'd1 : 5'd1;
+                else if (error_timer < TIMER_STEP * 3) 
+                    countdown_reg <= (config_countdown >= 3) ? config_countdown - 5'd2 : 5'd1;
+                else if (error_timer < TIMER_STEP * 4) 
+                    countdown_reg <= (config_countdown >= 4) ? config_countdown - 5'd3 : 5'd1;
+                else if (error_timer < TIMER_STEP * 5) 
+                    countdown_reg <= (config_countdown >= 5) ? config_countdown - 5'd4 : 5'd1;
+                else if (error_timer < TIMER_STEP * 6) 
+                    countdown_reg <= (config_countdown >= 6) ? config_countdown - 5'd5 : 5'd1;
+                else if (error_timer < TIMER_STEP * 7) 
+                    countdown_reg <= (config_countdown >= 7) ? config_countdown - 5'd6 : 5'd1;
+                else if (error_timer < TIMER_STEP * 8) 
+                    countdown_reg <= (config_countdown >= 8) ? config_countdown - 5'd7 : 5'd1;
+                else if (error_timer < TIMER_STEP * 9) 
+                    countdown_reg <= (config_countdown >= 9) ? config_countdown - 5'd8 : 5'd1;
+                else if (error_timer < TIMER_STEP * 10) 
+                    countdown_reg <= (config_countdown >= 10) ? config_countdown - 5'd9 : 5'd1;
+                else if (error_timer < TIMER_STEP * 11) 
+                    countdown_reg <= (config_countdown >= 11) ? config_countdown - 5'd10 : 5'd1;
+                else if (error_timer < TIMER_STEP * 12) 
+                    countdown_reg <= (config_countdown >= 12) ? config_countdown - 5'd11 : 5'd1;
+                else if (error_timer < TIMER_STEP * 13) 
+                    countdown_reg <= (config_countdown >= 13) ? config_countdown - 5'd12 : 5'd1;
+                else if (error_timer < TIMER_STEP * 14) 
+                    countdown_reg <= (config_countdown >= 14) ? config_countdown - 5'd13 : 5'd1;
+                else 
+                    countdown_reg <= 5'd1;
             end else begin
                 error_timer <= 30'd0;
                 error_led <= 1'b0;
                 error_timeout <= 1'b1;
-                countdown_reg <= 4'd0;
+                countdown_reg <= 5'd0;
             end
         end else begin
             error_timer <= 30'd0;
             error_led <= 1'b0;
             error_timeout <= 1'b0;
-            countdown_reg <= 4'd7;
+            countdown_reg <= config_countdown; // Reset to configured countdown
         end
     end
 end
@@ -370,6 +399,7 @@ matrix_manager_optimized #(
 ) matrix_mgr_inst (
     .clk(clk),
     .rst_n(rst_n),
+    .dim_limit_per_size(config_matrices_per_size),
     .alloc_req(alloc_req_mux),
     .alloc_m(alloc_m_mux),
     .alloc_n(alloc_n_mux),
@@ -570,6 +600,7 @@ setting_mode setting_mode_inst (
     .config_max_dim(config_max_dim_from_setting),
     .config_max_value(config_max_value_from_setting),
     .config_matrices_per_size(config_matrices_per_size_from_setting),
+    .config_countdown(config_countdown_from_setting),
     .error_code(error_code_setting),
     .sub_state(sub_state_setting),
     .btn_confirm(setting_mode_active ? btn_confirm_pulse : 1'b0)
@@ -588,9 +619,10 @@ display_ctrl disp_ctrl_inst (
         // ?1?7??? Compute ģʽ?1?7??? op_typeΪ 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         .error_code(error_code),
-        .countdown_val(countdown_val), // Connect countdown value
+        .countdown_val(countdown_val), // Connect countdown value (5-bit)
         .seg_display(seg_display), // ֱ?1?7??? Output Port
         .seg_countdown(seg_countdown), // New port for countdown display
+        .count_down_select(count_down_select), // 2-bit one-hot for countdown digit selection
         .led_status(led_status),
         .seg_select(seg_select)    // ֱ?1?7??? Output Port
     );

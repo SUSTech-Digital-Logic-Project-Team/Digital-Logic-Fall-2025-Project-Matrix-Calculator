@@ -15,7 +15,10 @@
 `define BRAM_ADDR_WIDTH   12          // 2^12 = 4096
 `define DEFAULT_MAX_DIM   5
 `define DEFAULT_MAX_VALUE 9
-`define DEFAULT_MATRICES_PER_SIZE 3
+`define DEFAULT_MATRICES_PER_SIZE 2
+`define DEFAULT_COUNTDOWN 10
+`define MIN_COUNTDOWN     5
+`define MAX_COUNTDOWN     15
 `define ELEMENT_WIDTH     8
 
 // Main state machine states

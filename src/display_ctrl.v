@@ -8,9 +8,10 @@ module display_ctrl (
     input wire [3:0] sub_state,
     input wire [3:0] op_type,
     input wire [3:0] error_code,
-    input wire [3:0] countdown_val, // 倒计时数值输入
+    input wire [4:0] countdown_val, // 倒计时数值输入 (5-bit for 5-15 seconds)
     output reg [6:0] seg_display,
     output reg [6:0] seg_countdown, // New port for countdown display
+    output reg [1:0] count_down_select, // 2-bit one-hot code for countdown digit selection
     output reg [3:0] led_status,
     output reg [1:0] seg_select // 改为 output，直接由内部逻辑控制扫描
 );
@@ -42,6 +43,14 @@ module display_ctrl (
 
     reg [6:0] disp_data_mode;
     reg [6:0] disp_data_op;
+    
+    // 扫描计数器 (提前声明以供倒计时逻辑使用)
+    // 使用 1kHz 扫描, scan_cnt[16] 翻转周期约为 1.3ms (100MHz时)
+    reg [16:0] scan_cnt;
+    always @(posedge clk or negedge rst_n) begin
+        if(!rst_n) scan_cnt <= 0;
+        else scan_cnt <= scan_cnt + 1;
+    end
 
     // 1. 解码主模式 (Digit 1 - 左侧)
     always @(*) begin
@@ -76,35 +85,54 @@ module display_ctrl (
         end
     end
 
-    // 3. 倒计时显示逻辑 (独立端口)
+    // 3. 倒计时显示逻辑 (两位数显示，使用独热码扫描)
+    // 分离十位和个位
+    wire [3:0] countdown_tens = countdown_val / 10;  // 十位 (0 or 1)
+    wire [3:0] countdown_ones = countdown_val % 10;  // 个位 (0-9)
+    
+    // 七段数码管编码函数
+    function [6:0] digit_to_seg;
+        input [3:0] digit;
+        begin
+            case (digit)
+                4'd0: digit_to_seg = S_0;
+                4'd1: digit_to_seg = S_1;
+                4'd2: digit_to_seg = S_2;
+                4'd3: digit_to_seg = S_3;
+                4'd4: digit_to_seg = S_4;
+                4'd5: digit_to_seg = S_5;
+                4'd6: digit_to_seg = S_6;
+                4'd7: digit_to_seg = S_7;
+                4'd8: digit_to_seg = S_8;
+                4'd9: digit_to_seg = S_9;
+                default: digit_to_seg = S_OFF;
+            endcase
+        end
+    endfunction
+    
+    // 倒计时显示扫描逻辑 (使用scan_cnt[16]进行高频切换)
     always @(*) begin
         if (error_code != 0) begin
-            case (countdown_val)
-                4'd0: seg_countdown = S_0;
-                4'd1: seg_countdown = S_1;
-                4'd2: seg_countdown = S_2;
-                4'd3: seg_countdown = S_3;
-                4'd4: seg_countdown = S_4;
-                4'd5: seg_countdown = S_5;
-                4'd6: seg_countdown = S_6;
-                4'd7: seg_countdown = S_7;
-                4'd8: seg_countdown = S_8;
-                4'd9: seg_countdown = S_9;
-                default: seg_countdown = S_OFF;
-            endcase
+            // 使用与主显示相同的扫描时钟进行切换
+            if (scan_cnt[16] == 1'b0) begin
+                // 显示十位 (左侧数码管)
+                count_down_select = 2'b10;
+                if (countdown_tens == 0)
+                    seg_countdown = S_OFF; // 十位为0时不显示
+                else
+                    seg_countdown = digit_to_seg(countdown_tens);
+            end else begin
+                // 显示个位 (右侧数码管)
+                count_down_select = 2'b01;
+                seg_countdown = digit_to_seg(countdown_ones);
+            end
         end else begin
             seg_countdown = S_OFF; // 无错误时不显示
+            count_down_select = 2'b00; // 关闭倒计时数码管
         end
     end
 
-    // 4. 扫描逻辑 (500Hz 左右足够，太慢会闪，太快会鬼影)
-    // 使用 1kHz 扫描
-    reg [16:0] scan_cnt;
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) scan_cnt <= 0;
-        else scan_cnt <= scan_cnt + 1;
-    end
-
+    // 4. 主显示扫描逻辑
     always @(*) begin
         // scan_cnt[16] 翻转周期约为 1.3ms (100MHz时)
         case (scan_cnt[16])

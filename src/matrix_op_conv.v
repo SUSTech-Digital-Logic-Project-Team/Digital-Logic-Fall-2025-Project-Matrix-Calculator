@@ -24,28 +24,42 @@ module matrix_op_conv #(
     
     output reg mem_wr_en,
     output reg [ADDR_WIDTH-1:0] mem_wr_addr,
-    output reg [ELEMENT_WIDTH-1:0] mem_wr_data
+    output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
+    
+    // Clock cycle counter output
+    output reg [31:0] cycle_count
 );
 
-    reg [4:0] i, j;  // Extended to 5 bits for dim up to 16
+    reg [4:0] i, j;  // Extended to 5 bits for dim up to 16 (now represents output position)
     reg [3:0] ki, kj; // Kernel indices 0..2
     reg [3:0] state;
     reg [15:0] acc;
     reg [ELEMENT_WIDTH-1:0] val_a;
     
-    // Signed indices for boundary check
-    reg signed [5:0] row_idx, col_idx;
+    // Output dimensions (input_dim - 2 for valid convolution)
+    wire [4:0] out_m = dim_m - 2;
+    wire [4:0] out_n = dim_n - 2;
+    
+    // Source indices in input image
+    // When output position is (i, j), the kernel center in input is at (i+1, j+1)
+    // Kernel offset from center: ki-1, kj-1 (for ki,kj in 0..2)
+    // So input position = (i+1 + ki-1, j+1 + kj-1) = (i+ki, j+kj)
+    wire [4:0] src_row = i + ki;
+    wire [4:0] src_col = j + kj;
+    
+    // Cycle counter
+    reg [31:0] cycle_counter;
+    reg counting;
     
     localparam S_IDLE = 0, 
                S_INIT_PIXEL = 1,
-               S_CHECK_BOUNDS = 2,
-               S_READ_A = 3, S_WAIT_A = 4,
-               S_READ_K = 5, S_WAIT_K = 6,
-               S_MAC = 7,
-               S_NEXT_KERNEL = 8,
-               S_WRITE = 9,
-               S_NEXT_PIXEL = 10,
-               S_DONE = 11;
+               S_READ_A = 2, S_WAIT_A = 3,
+               S_READ_K = 4, S_WAIT_K = 5,
+               S_MAC = 6,
+               S_NEXT_KERNEL = 7,
+               S_WRITE = 8,
+               S_NEXT_PIXEL = 9,
+               S_DONE = 10;
                
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -56,12 +70,22 @@ module matrix_op_conv #(
             i <= 0; j <= 0;
             ki <= 0; kj <= 0;
             acc <= 0;
+            cycle_counter <= 0;
+            cycle_count <= 0;
+            counting <= 0;
         end else begin
+            // Count cycles while processing
+            if (counting) begin
+                cycle_counter <= cycle_counter + 1;
+            end
+            
             case (state)
                 S_IDLE: begin
                     done <= 0;
                     if (start) begin
                         i <= 0; j <= 0;
+                        cycle_counter <= 0;
+                        counting <= 1;
                         state <= S_INIT_PIXEL;
                     end
                 end
@@ -69,29 +93,14 @@ module matrix_op_conv #(
                 S_INIT_PIXEL: begin
                     acc <= 0;
                     ki <= 0; kj <= 0;
-                    state <= S_CHECK_BOUNDS;
+                    state <= S_READ_A;
                 end
                 
-                S_CHECK_BOUNDS: begin
-                    // Calculate neighbor coordinates (centered at i,j)
-                    // Kernel is 3x3. Center is (1,1).
-                    // Offset: -1, 0, +1
-                    // row_idx = i + ki - 1
-                    // col_idx = j + kj - 1
-                    row_idx = {2'b0, i} + {2'b0, ki} - 6'd1;
-                    col_idx = {2'b0, j} + {2'b0, kj} - 6'd1;
-                    
-                    if (row_idx >= 0 && row_idx < dim_m && col_idx >= 0 && col_idx < dim_n) begin
-                        state <= S_READ_A;
-                    end else begin
-                        // Out of bounds, treat value as 0, skip read/mac
-                        state <= S_NEXT_KERNEL;
-                    end
-                end
-                
+                // No bounds check needed - all positions are valid in valid convolution
                 S_READ_A: begin
                     mem_rd_en <= 1;
-                    mem_rd_addr <= addr_op1 + (row_idx[3:0] * dim_n) + col_idx[3:0];
+                    // Input position = (i + ki, j + kj)
+                    mem_rd_addr <= addr_op1 + (src_row * dim_n) + src_col;
                     state <= S_WAIT_A;
                 end
                 
@@ -103,8 +112,7 @@ module matrix_op_conv #(
                 S_READ_K: begin
                     val_a <= mem_rd_data; // Store A pixel
                     mem_rd_en <= 1;
-                    // Kernel is assumed 3x3. Index = ki * 3 + kj
-                    // If Op2 is larger, we only use top-left 3x3.
+                    // Kernel is 3x3. Index = ki * 3 + kj
                     mem_rd_addr <= addr_op2 + (ki * 3) + kj;
                     state <= S_WAIT_K;
                 end
@@ -126,27 +134,29 @@ module matrix_op_conv #(
                             state <= S_WRITE;
                         end else begin
                             ki <= ki + 1;
-                            state <= S_CHECK_BOUNDS;
+                            state <= S_READ_A;
                         end
                     end else begin
                         kj <= kj + 1;
-                        state <= S_CHECK_BOUNDS;
+                        state <= S_READ_A;
                     end
                 end
-                //Inside the kernel, j move from 0 to 2, and then go to 0, repeat for 3 times
                 
                 S_WRITE: begin
                     mem_wr_en <= 1;
-                    mem_wr_addr <= addr_res + (i * dim_n) + j;
+                    // Output position (i, j) in result matrix of size out_m x out_n
+                    mem_wr_addr <= addr_res + (i * out_n) + j;
                     mem_wr_data <= acc[7:0];
                     state <= S_NEXT_PIXEL;
                 end
                 
                 S_NEXT_PIXEL: begin
                     mem_wr_en <= 0;
-                    if (j == dim_n - 1) begin
+                    if (j == out_n - 1) begin
                         j <= 0;
-                        if (i == dim_m - 1) begin
+                        if (i == out_m - 1) begin
+                            counting <= 0;
+                            cycle_count <= cycle_counter + 1; // Save final count
                             state <= S_DONE;
                         end else begin
                             i <= i + 1;

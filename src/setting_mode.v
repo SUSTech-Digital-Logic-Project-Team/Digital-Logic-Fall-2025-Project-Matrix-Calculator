@@ -28,6 +28,7 @@ module setting_mode #(
     output reg [4:0] config_max_dim,
     output reg [4:0] config_max_value,
     output reg [4:0] config_matrices_per_size,
+    output reg [4:0] config_countdown,  // Countdown timer setting (5-15 seconds)
     
     // Error and state output
     output reg [3:0] error_code,
@@ -36,18 +37,19 @@ module setting_mode #(
 
 // State definitions
 localparam IDLE = 4'd0, WAIT_MAX_DIM = 4'd1, WAIT_MAX_VAL = 4'd2,
-           WAIT_MAT_PER_SIZE = 4'd3, CONFIRM = 4'd4, DONE = 4'd5, APPLY = 4'd6;
+           WAIT_MAT_PER_SIZE = 4'd3, WAIT_COUNTDOWN = 4'd7, CONFIRM = 4'd4, DONE = 4'd5, APPLY = 4'd6;
 
 // Internal configuration
 reg [7:0] cfg_max_dim;
 reg [3:0] cfg_max_value;
 reg [3:0] cfg_matrices_per_size;
+reg [4:0] cfg_countdown;      // Countdown timer setting
 reg [7:0] parse_accum;        // Accumulator for multi-digit number
 
 // Prompt display counter (for message cycling)
-reg [1:0] message_state;
-reg [3:0] print_step;
-localparam MSG_DIM = 2'd0, MSG_VALUE = 2'd1, MSG_MATRICES = 2'd2, MSG_CONFIRM = 2'd3;
+reg [2:0] message_state;
+reg [4:0] print_step;
+localparam MSG_DIM = 3'd0, MSG_VALUE = 3'd1, MSG_MATRICES = 3'd2, MSG_COUNTDOWN = 3'd3, MSG_CONFIRM = 3'd4;
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -55,15 +57,17 @@ always @(posedge clk or negedge rst_n) begin
         config_max_dim <= `DEFAULT_MAX_DIM;
         config_max_value <= `DEFAULT_MAX_VALUE;
         config_matrices_per_size <= `DEFAULT_MATRICES_PER_SIZE;
+        config_countdown <= `DEFAULT_COUNTDOWN;
         cfg_max_dim <= `DEFAULT_MAX_DIM;
         cfg_max_value <= `DEFAULT_MAX_VALUE;
         cfg_matrices_per_size <= `DEFAULT_MATRICES_PER_SIZE;
+        cfg_countdown <= `DEFAULT_COUNTDOWN;
         tx_start <= 1'b0;
         tx_data <= 8'd0;
         error_code <= `ERR_NONE;
         parse_accum <= 8'd0;
         message_state <= MSG_DIM;
-        print_step <= 4'd0;
+        print_step <= 5'd0;
         clear_rx_buffer <= 1'b0;
     end else if (mode_active) begin
         // Default one-shot signals
@@ -75,10 +79,11 @@ always @(posedge clk or negedge rst_n) begin
                 cfg_max_dim <= `DEFAULT_MAX_DIM;
                 cfg_max_value <= `DEFAULT_MAX_VALUE;
                 cfg_matrices_per_size <= `DEFAULT_MATRICES_PER_SIZE;
+                cfg_countdown <= `DEFAULT_COUNTDOWN;
                 parse_accum <= 8'd0;
                 error_code <= `ERR_NONE;
                 message_state <= MSG_DIM;
-                print_step <= 4'd0;
+                print_step <= 5'd0;
                 sub_state <= WAIT_MAX_DIM;
             end
             
@@ -174,13 +179,49 @@ always @(posedge clk or negedge rst_n) begin
                                     if (parse_accum > 0 && parse_accum <= 20) begin
                                         cfg_matrices_per_size <= parse_accum[3:0];
                                         parse_accum <= 8'd0;
-                                        message_state <= MSG_CONFIRM;
-                                        sub_state <= CONFIRM;
+                                        message_state <= MSG_COUNTDOWN;
+                                        sub_state <= WAIT_COUNTDOWN;
                                     end else begin
                                         // Invalid matrices per size
                                         error_code <= `ERR_NO_SPACE;
                                         parse_accum <= 8'd0;
                                         message_state <= MSG_MATRICES;
+                                    end
+                                    clear_rx_buffer <= 1'b1;
+                                end
+                            end
+                        end
+                    endcase
+                end
+            end
+            
+            WAIT_COUNTDOWN: begin
+                // Send prompt for countdown timer (5-15 seconds)
+                if (!tx_busy && !tx_start) begin
+                    case (message_state)
+                        MSG_COUNTDOWN: begin
+                            tx_data <= "T";  // 'T' for Timer/Countdown
+                            tx_start <= 1'b1;
+                            message_state <= MSG_COUNTDOWN + 1;
+                        end
+                        default: begin
+                            // Prompt sent, wait for input
+                            if (rx_done) begin
+                                if (rx_data >= "0" && rx_data <= "9") begin
+                                    // Parse digit
+                                    parse_accum <= (parse_accum << 3) + (parse_accum << 1) + (rx_data - "0");
+                                end else if (rx_data == 8'h20) begin
+                                    // Enter key - confirm the value (5-15 seconds)
+                                    if (parse_accum >= `MIN_COUNTDOWN && parse_accum <= `MAX_COUNTDOWN) begin
+                                        cfg_countdown <= parse_accum[4:0];
+                                        parse_accum <= 8'd0;
+                                        message_state <= MSG_CONFIRM;
+                                        sub_state <= CONFIRM;
+                                    end else begin
+                                        // Invalid countdown value - use default
+                                        error_code <= `ERR_VALUE_RANGE;
+                                        parse_accum <= 8'd0;
+                                        message_state <= MSG_COUNTDOWN;
                                     end
                                     clear_rx_buffer <= 1'b1;
                                 end
@@ -207,6 +248,7 @@ always @(posedge clk or negedge rst_n) begin
                             config_max_dim <= cfg_max_dim;
                             config_max_value <= cfg_max_value;
                             config_matrices_per_size <= cfg_matrices_per_size;
+                            config_countdown <= cfg_countdown;
                             error_code <= `ERR_NONE;
                             
                             tx_data <= "S";
@@ -265,12 +307,27 @@ always @(posedge clk or negedge rst_n) begin
                             tx_start <= 1'b1;
                             print_step <= 11;
                         end
+                        11: begin tx_data <= 8'h20; tx_start <= 1'b1; print_step <= 12; end
+                        
+                        // Echo Countdown (up to 2 digits)
+                        12: begin
+                            if (cfg_countdown >= 10) begin
+                                tx_data <= (cfg_countdown / 10) + "0";
+                                tx_start <= 1'b1;
+                            end
+                            print_step <= 13;
+                        end
+                        13: begin
+                            tx_data <= (cfg_countdown % 10) + "0";
+                            tx_start <= 1'b1;
+                            print_step <= 14;
+                        end
                         
                         // Newline
-                        11: begin tx_data <= 8'h0D; tx_start <= 1'b1; print_step <= 12; end
-                        12: begin tx_data <= 8'h0A; tx_start <= 1'b1; print_step <= 13; end
+                        14: begin tx_data <= 8'h0D; tx_start <= 1'b1; print_step <= 15; end
+                        15: begin tx_data <= 8'h0A; tx_start <= 1'b1; print_step <= 16; end
                         
-                        13: begin
+                        16: begin
                             sub_state <= DONE;
                             print_step <= 0;
                         end
