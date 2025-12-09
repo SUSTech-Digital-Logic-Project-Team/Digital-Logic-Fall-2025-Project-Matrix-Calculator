@@ -103,6 +103,10 @@ reg [3:0] print_step;
 reg [11:0] print_addr;
 reg tx_pending; // Flag to prevent double-sending before tx_busy goes high
 
+// Registers for cycle count output
+reg [31:0] cycle_count_reg;   // Stored cycle count for printing
+reg [3:0] cycle_print_step;   // Step for printing cycle count digits
+
 // Registers for EXECUTE/SEND_RESULT
 reg [7:0] res_send_idx;
 reg [7:0] read_idx;
@@ -132,6 +136,7 @@ wire [ELEMENT_WIDTH-1:0] op_wr_data_mul;
 wire op_rd_en_conv, op_wr_en_conv, done_conv;
 wire [ADDR_WIDTH-1:0] op_rd_addr_conv, op_wr_addr_conv;
 wire [ELEMENT_WIDTH-1:0] op_wr_data_conv;
+wire [31:0] conv_cycle_count; // Convolution clock cycle counter
 
 // Instantiations
 matrix_op_add op_add_inst (
@@ -171,7 +176,8 @@ matrix_op_conv op_conv_inst (
     .dim_m(op1_m), .dim_n(op1_n),
     .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
     .mem_rd_en(op_rd_en_conv), .mem_rd_addr(op_rd_addr_conv), .mem_rd_data(mem_rd_data),
-    .mem_wr_en(op_wr_en_conv), .mem_wr_addr(op_wr_addr_conv), .mem_wr_data(op_wr_data_conv)
+    .mem_wr_en(op_wr_en_conv), .mem_wr_addr(op_wr_addr_conv), .mem_wr_data(op_wr_data_conv),
+    .cycle_count(conv_cycle_count)
 );
 
 assign done_op = done_add | done_smul | done_trans | done_mul | done_conv;
@@ -268,14 +274,32 @@ always @(posedge clk or negedge rst_n) begin
                     sub_state <= IDLE;
                 end else begin
                     case (sel_step)
-                        // PHASE 1: STATISTICS
-                    5'd0: begin // Init
+                        // PHASE 1: STATISTICS - New format: "Total M*N*C M*N*C ..."
+                    5'd0: begin // Init - Print total matrix count first
                         iter_m <= 1;
                         iter_n <= 1;
                         scan_slot <= 0;
                         current_count <= 0;
-                        sel_step <= 5'd1;
+                        sel_step <= 7'd80; // Go to print total count
                         input_accum <= 0;
+                        print_step <= 0;
+                    end
+                    
+                    // Print total matrix count
+                    7'd80: begin
+                        if (!tx_busy && !tx_pending) begin
+                            case (print_step)
+                                0: begin
+                                    if (total_matrix_count >= 10) begin
+                                        tx_data <= (total_matrix_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1;
+                                    end else begin
+                                        tx_data <= total_matrix_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2;
+                                    end
+                                end
+                                1: begin tx_data <= (total_matrix_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                2: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd1; end // Space, then start scanning
+                            endcase
+                        end
                     end
                     
                     5'd1: begin // Set query
@@ -300,44 +324,47 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    5'd3: begin // Print "M N : C"
+                    5'd3: begin // Print "M*N*C " format (single line, space separated)
                         if (!tx_busy && !tx_pending) begin
                             case (print_step)
+                                // Print M (row)
                                 0: begin 
                                     if (iter_m >= 10) begin
-                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 9; 
+                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 12; 
                                     end else begin
                                         tx_data <= iter_m + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; 
                                     end
                                 end
-                                9: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
-
-                                1: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                12: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
                                 
+                                // Print '*'
+                                1: begin tx_data <= "*"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                
+                                // Print N (column)
                                 2: begin 
                                     if (iter_n >= 10) begin
-                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 10; 
+                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 13; 
                                     end else begin
                                         tx_data <= iter_n + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; 
                                     end
                                 end
-                                10: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
-
-                                3: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 4; end
-                                4: begin tx_data <= ":"; tx_start <= 1; tx_pending <= 1; print_step <= 5; end
-                                5: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 6; end
+                                13: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
                                 
-                                6: begin 
+                                // Print '*'
+                                3: begin tx_data <= "*"; tx_start <= 1; tx_pending <= 1; print_step <= 4; end
+                                
+                                // Print count
+                                4: begin 
                                     if (current_count >= 10) begin
-                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 11;
+                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 14;
                                     end else begin
-                                        tx_data <= current_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; 
+                                        tx_data <= current_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 5; 
                                     end
                                 end
-                                11: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; end
-
-                                7: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 8; end 
-                                8: begin tx_data <= 8'h0A; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd4; end 
+                                14: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 5; end
+                                
+                                // Print space (separator for next entry)
+                                5: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd4; end
                             endcase
                         end
                     end
@@ -353,8 +380,19 @@ always @(posedge clk or negedge rst_n) begin
                             iter_n <= 1;
                             sel_step <= 5'd1;
                         end else begin
-                            sel_step <= 5'd5; 
-                            input_accum <= 0;
+                            // Done with all dimensions, print newline then go to input phase
+                            sel_step <= 7'd81;
+                            print_step <= 0;
+                        end
+                    end
+                    
+                    // Print newline after all statistics
+                    7'd81: begin
+                        if (!tx_busy && !tx_pending) begin
+                            case (print_step)
+                                0: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 1; end // CR
+                                1: begin tx_data <= 8'h0A; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd5; input_accum <= 0; end // LF
+                            endcase
                         end
                     end
 
@@ -598,12 +636,30 @@ always @(posedge clk or negedge rst_n) begin
                     // ==========================================
                     // NEW: Stats & Selection for 2nd Operand (Mul)
                     // ==========================================
-                    6'd44: begin // Init Stats for Op2
+                    6'd44: begin // Init Stats for Op2 - Print total first
                         iter_m <= 1;
                         iter_n <= 1;
                         scan_slot <= 0;
                         current_count <= 0;
-                        sel_step <= 6'd45;
+                        sel_step <= 7'd82; // Go to print total count for Op2
+                        print_step <= 0;
+                    end
+                    
+                    // Print total matrix count for Op2
+                    7'd82: begin
+                        if (!tx_busy && !tx_pending) begin
+                            case (print_step)
+                                0: begin
+                                    if (total_matrix_count >= 10) begin
+                                        tx_data <= (total_matrix_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1;
+                                    end else begin
+                                        tx_data <= total_matrix_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2;
+                                    end
+                                end
+                                1: begin tx_data <= (total_matrix_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                2: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd45; end // Space, then start scanning
+                            endcase
+                        end
                     end
                     
                     6'd45: begin // Set query
@@ -628,44 +684,47 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    6'd47: begin // Print "M N : C"
+                    6'd47: begin // Print "M*N*C " format for Op2
                         if (!tx_busy && !tx_pending) begin
                             case (print_step)
+                                // Print M (row)
                                 0: begin 
                                     if (iter_m >= 10) begin
-                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 9; 
+                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 12; 
                                     end else begin
                                         tx_data <= iter_m + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; 
                                     end
                                 end
-                                9: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
-
-                                1: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                12: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
                                 
+                                // Print '*'
+                                1: begin tx_data <= "*"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                
+                                // Print N (column)
                                 2: begin 
                                     if (iter_n >= 10) begin
-                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 10; 
+                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 13; 
                                     end else begin
                                         tx_data <= iter_n + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; 
                                     end
                                 end
-                                10: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
-
-                                3: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 4; end
-                                4: begin tx_data <= ":"; tx_start <= 1; tx_pending <= 1; print_step <= 5; end
-                                5: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 6; end
+                                13: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
                                 
-                                6: begin 
+                                // Print '*'
+                                3: begin tx_data <= "*"; tx_start <= 1; tx_pending <= 1; print_step <= 4; end
+                                
+                                // Print count
+                                4: begin 
                                     if (current_count >= 10) begin
-                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 11;
+                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 14;
                                     end else begin
-                                        tx_data <= current_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; 
+                                        tx_data <= current_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 5; 
                                     end
                                 end
-                                11: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; end
-
-                                7: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 8; end 
-                                8: begin tx_data <= 8'h0A; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd48; end 
+                                14: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 5; end
+                                
+                                // Print space (separator)
+                                5: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd48; end
                             endcase
                         end
                     end
@@ -681,8 +740,19 @@ always @(posedge clk or negedge rst_n) begin
                             iter_n <= 1;
                             sel_step <= 6'd45;
                         end else begin
-                            sel_step <= 6'd49; // Wait for Op2 Dims
-                            input_accum <= 0;
+                            // Done, print newline then go to input phase
+                            sel_step <= 7'd83;
+                            print_step <= 0;
+                        end
+                    end
+                    
+                    // Print newline after Op2 statistics
+                    7'd83: begin
+                        if (!tx_busy && !tx_pending) begin
+                            case (print_step)
+                                0: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 1; end // CR
+                                1: begin tx_data <= 8'h0A; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd49; input_accum <= 0; end // LF
+                            endcase
                         end
                     end
 
@@ -1355,6 +1425,10 @@ always @(posedge clk or negedge rst_n) begin
                         if (selected_op_type == OP_TRANSPOSE) begin
                             alloc_m <= target_n;
                             alloc_n <= target_m;
+                        end else if (selected_op_type == OP_CONV) begin
+                            // Valid convolution: output size = input_size - 2
+                            alloc_m <= op1_m - 2;
+                            alloc_n <= op1_n - 2;
                         end else begin
                             alloc_m <= target_m;
                             alloc_n <= target_n;
@@ -1387,8 +1461,9 @@ always @(posedge clk or negedge rst_n) begin
                             commit_m <= op1_m;
                             commit_n <= target_n;
                         end else if (selected_op_type == OP_CONV) begin
-                            commit_m <= op1_m;
-                            commit_n <= op1_n;
+                            // Valid convolution: output size = input_size - 2
+                            commit_m <= op1_m - 2;
+                            commit_n <= op1_n - 2;
                         end else begin
                             commit_m <= target_m;
                             commit_n <= target_n;
@@ -1411,8 +1486,9 @@ always @(posedge clk or negedge rst_n) begin
                             iter_m <= op1_m;
                             iter_n <= target_n;
                         end else if (selected_op_type == OP_CONV) begin
-                            iter_m <= op1_m;
-                            iter_n <= op1_n;
+                            // Valid convolution: output size = input_size - 2
+                            iter_m <= op1_m - 2;
+                            iter_n <= op1_n - 2;
                         end else begin
                             iter_m <= target_m;
                             iter_n <= target_n;
@@ -1420,7 +1496,7 @@ always @(posedge clk or negedge rst_n) begin
                         
                         res_send_idx <= 0;
                         sub_state <= SEND_RESULT;
-                    end
+                       end
                 endcase
             end
 
@@ -1506,11 +1582,114 @@ always @(posedge clk or negedge rst_n) begin
                             tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == iter_m - 1) begin
-                                res_send_idx <= 5; 
+                                // Check if convolution - need to output cycle count
+                                if (selected_op_type == OP_CONV) begin
+                                    cycle_count_reg <= conv_cycle_count;
+                                    cycle_print_step <= 0;
+                                    res_send_idx <= 9; // Go to cycle count output
+                                end else begin
+                                    res_send_idx <= 5; // Normal done
+                                end
                             end else begin
                                 print_r <= print_r + 1;
                                 res_send_idx <= 2; 
                             end
+                        end
+                    end
+                    // ===== Convolution Cycle Count Output States =====
+                    9: begin // Print "Cycles: " label
+                        if (!tx_busy && !tx_pending) begin
+                            case (cycle_print_step)
+                                0: begin tx_data <= "C"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 1; end
+                                1: begin tx_data <= "y"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 2; end
+                                2: begin tx_data <= "c"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 3; end
+                                3: begin tx_data <= "l"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 4; end
+                                4: begin tx_data <= "e"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 5; end
+                                5: begin tx_data <= "s"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 6; end
+                                6: begin tx_data <= ":"; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 7; end
+                                7: begin tx_data <= " "; tx_start <= 1; tx_pending <= 1; cycle_print_step <= 0; res_send_idx <= 10; end
+                            endcase
+                        end
+                    end
+                    10: begin // Print cycle count (up to 10 digits for 32-bit number)
+                        if (!tx_busy && !tx_pending) begin
+                            // Find first non-zero digit or output 0
+                            if (cycle_count_reg >= 1000000000) begin
+                                tx_data <= (cycle_count_reg / 1000000000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 1000000000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 9; // Mark we've started printing
+                            end else if (cycle_count_reg >= 100000000 || cycle_print_step == 9) begin
+                                tx_data <= (cycle_count_reg / 100000000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 100000000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 8;
+                            end else if (cycle_count_reg >= 10000000 || cycle_print_step == 8) begin
+                                tx_data <= (cycle_count_reg / 10000000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 10000000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 7;
+                            end else if (cycle_count_reg >= 1000000 || cycle_print_step == 7) begin
+                                tx_data <= (cycle_count_reg / 1000000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 1000000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 6;
+                            end else if (cycle_count_reg >= 100000 || cycle_print_step == 6) begin
+                                tx_data <= (cycle_count_reg / 100000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 100000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 5;
+                            end else if (cycle_count_reg >= 10000 || cycle_print_step == 5) begin
+                                tx_data <= (cycle_count_reg / 10000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 10000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 4;
+                            end else if (cycle_count_reg >= 1000 || cycle_print_step == 4) begin
+                                tx_data <= (cycle_count_reg / 1000) + "0";
+                                cycle_count_reg <= cycle_count_reg % 1000;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 3;
+                            end else if (cycle_count_reg >= 100 || cycle_print_step == 3) begin
+                                tx_data <= (cycle_count_reg / 100) + "0";
+                                cycle_count_reg <= cycle_count_reg % 100;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 2;
+                            end else if (cycle_count_reg >= 10 || cycle_print_step == 2) begin
+                                tx_data <= (cycle_count_reg / 10) + "0";
+                                cycle_count_reg <= cycle_count_reg % 10;
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                cycle_print_step <= 1;
+                            end else begin
+                                tx_data <= cycle_count_reg[3:0] + "0";
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                res_send_idx <= 11; // Done with number, send newline
+                            end
+                        end
+                    end
+                    11: begin // Send CR after cycle count
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0D; // CR
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            res_send_idx <= 12;
+                        end
+                    end
+                    12: begin // Send LF after cycle count
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            res_send_idx <= 5; // Go to Done
                         end
                     end
                     5: begin // Done
