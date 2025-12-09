@@ -14,6 +14,7 @@ module matrix_manager_optimized #(
 )(
     input wire clk,
     input wire rst_n,
+    input wire [4:0] config_matrices_per_size,
     
     // ========================================
     // Matrix Allocation Interface
@@ -59,6 +60,11 @@ module matrix_manager_optimized #(
 (* ram_style = "distributed" *) reg [4:0] matrix_cols [0:MAX_STORAGE_MATRICES-1];  // extended to 5 bits
 (* ram_style = "distributed" *) reg [11:0] matrix_start_addr [0:MAX_STORAGE_MATRICES-1];
 (* ram_style = "distributed" *) reg [11:0] matrix_end_addr [0:MAX_STORAGE_MATRICES-1];
+(* ram_style = "distributed" *) reg [15:0] slot_age [0:MAX_STORAGE_MATRICES-1];
+reg [15:0] global_age_counter;
+
+localparam [4:0] MAX_STORAGE_5B = MAX_STORAGE_MATRICES;
+wire [4:0] per_dim_limit = (config_matrices_per_size > MAX_STORAGE_MATRICES) ? MAX_STORAGE_5B : config_matrices_per_size;
 
 // ========================================
 // Query Output Combinational Logic
@@ -77,6 +83,9 @@ assign query_element_count = (matrix_end_addr[query_slot] - matrix_start_addr[qu
 reg [3:0] temp_slot;
 reg [11:0] temp_addr;
 reg [11:0] required_size;
+reg [4:0] dim_count;
+reg [15:0] oldest_age;
+reg [3:0] oldest_slot_for_dim;
 integer init_i;
 integer search_i;
 
@@ -89,8 +98,10 @@ always @(posedge clk or negedge rst_n) begin
             matrix_cols[init_i] <= 4'd0;
             matrix_start_addr[init_i] <= 12'd0;
             matrix_end_addr[init_i] <= 12'd0;
+            slot_age[init_i] <= 16'd0;
         end
         
+        global_age_counter <= 16'd0;
         alloc_valid <= 1'b0;
         alloc_slot <= 4'hF;
         alloc_addr <= 12'd0;
@@ -104,6 +115,11 @@ always @(posedge clk or negedge rst_n) begin
         if (alloc_req) begin
             // Compute required storage size (m*n)
             required_size = {8'd0, alloc_m} * {8'd0, alloc_n};
+
+            // Track per-dimension usage and oldest slot for overwrite
+            dim_count = 5'd0;
+            oldest_age = 16'hFFFF;
+            oldest_slot_for_dim = 4'hF;
 
             // Find first free slot (priority: lowest index)
             temp_slot = 4'hF;
@@ -119,10 +135,23 @@ always @(posedge clk or negedge rst_n) begin
                 if (matrix_valid[search_i] && matrix_end_addr[search_i] > temp_addr) begin
                     temp_addr = matrix_end_addr[search_i];
                 end
+                if (matrix_valid[search_i] && matrix_rows[search_i] == alloc_m && matrix_cols[search_i] == alloc_n) begin
+                    dim_count = dim_count + 1'b1;
+                    if (slot_age[search_i] < oldest_age) begin
+                        oldest_age = slot_age[search_i];
+                        oldest_slot_for_dim = search_i[3:0];
+                    end
+                end
             end
 
-            // Check capacity and acknowledge allocation
-            if (temp_slot != 4'hF && (temp_addr + required_size) <= MAX_ELEMENTS) begin
+            // Decide whether to reuse an old slot (FIFO per dimension) or grab a free slot
+            if (dim_count >= per_dim_limit && oldest_slot_for_dim != 4'hF) begin
+                // Reuse the oldest slot for this dimension
+                alloc_slot <= oldest_slot_for_dim;
+                alloc_addr <= matrix_start_addr[oldest_slot_for_dim];
+                alloc_valid <= 1'b1;
+            end else if (dim_count < per_dim_limit && temp_slot != 4'hF && (temp_addr + required_size) <= MAX_ELEMENTS) begin
+                // New slot allocation
                 alloc_slot <= temp_slot;
                 alloc_addr <= temp_addr;
                 alloc_valid <= 1'b1;
@@ -136,6 +165,8 @@ always @(posedge clk or negedge rst_n) begin
             matrix_cols[commit_slot] <= commit_n;
             matrix_start_addr[commit_slot] <= commit_addr;
             matrix_end_addr[commit_slot] <= commit_addr + {8'd0, commit_m} * {8'd0, commit_n};
+            slot_age[commit_slot] <= global_age_counter;
+            global_age_counter <= global_age_counter + 1'b1;
         end
     end
 end

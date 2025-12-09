@@ -370,6 +370,7 @@ matrix_manager_optimized #(
 ) matrix_mgr_inst (
     .clk(clk),
     .rst_n(rst_n),
+    .config_matrices_per_size(config_matrices_per_size),
     .alloc_req(alloc_req_mux),
     .alloc_m(alloc_m_mux),
     .alloc_n(alloc_n_mux),
