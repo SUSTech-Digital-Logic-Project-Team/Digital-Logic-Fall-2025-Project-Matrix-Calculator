@@ -501,7 +501,8 @@ generate_mode generate_mode_inst (
     .timeout_reset(error_timeout), 
     .mem_rd_en(mem_rd_en_generate),
     .mem_rd_addr(mem_rd_addr_generate), 
-    .mem_rd_data(mem_b_dout)
+    .mem_rd_data(mem_b_dout),
+    .config_matrices_per_size(config_matrices_per_size)
 );
 
 // ========================================
@@ -583,7 +584,8 @@ compute_mode compute_mode_inst (
         
         .error_code(error_code_compute),
         .sub_state(sub_state_compute),
-        .timeout_reset(error_timeout)
+        .timeout_reset(error_timeout), 
+        .random_number(random_value)
     );
 
 // ========================================

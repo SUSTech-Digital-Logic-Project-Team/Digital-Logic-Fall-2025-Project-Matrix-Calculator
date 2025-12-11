@@ -17,6 +17,7 @@ module generate_mode #(
     // Configuration parameters
     input wire [4:0] config_max_dim,   // Extended to 5 bits
     input wire [3:0] config_max_value,
+    input wire [7:0] config_matrices_per_size,
     input wire [3:0] random_value,
     
     // UART receive interface
@@ -145,7 +146,7 @@ always @(posedge clk or negedge rst_n) begin
                 if (timeout_reset) begin
                     sub_state <= IDLE;
                 end else if (rx_done) begin
-                    if (rx_data == 8'h20) begin // 空格键作为分隔符
+                    if (rx_data == 8'h20 && parse_accum <= config_matrices_per_size) begin // 空格键作为分隔符
                         gen_count <= parse_accum[4:0];
                         parse_accum <= 8'd0;
                         sub_state <= PARSE_M;

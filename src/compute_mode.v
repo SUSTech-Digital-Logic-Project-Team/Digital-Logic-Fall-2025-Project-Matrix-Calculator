@@ -65,7 +65,10 @@ module compute_mode #(
     output reg [3:0] sub_state,
     
     // Error recovery signal
-    input wire timeout_reset
+    input wire timeout_reset,
+
+    // Random Choosing 
+    input wire [1:0] random_number
 );
 
 // State definitions
@@ -603,6 +606,12 @@ always @(posedge clk or negedge rst_n) begin
                                 match_idx <= 1;
                                 sel_step <= 5'd14; 
                                 error_code <= `ERR_NONE;
+                            end else if (rx_data == "R") begin
+                                user_sel_idx <= random_number + 1; // Random index between 1-4
+                                scan_slot <= 0;
+                                match_idx <= 1;
+                                sel_step <= 5'd14; 
+                                error_code <= `ERR_NONE;
                             end else begin
                                 error_code <= `ERR_VALUE_RANGE;
                                 if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
@@ -981,6 +990,12 @@ always @(posedge clk or negedge rst_n) begin
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
                                 user_sel_idx <= rx_data - "0";
+                                scan_slot <= 0;
+                                match_idx <= 1;
+                                sel_step <= 6'd17;
+                                error_code <= `ERR_NONE;
+                            end else if (rx_data == "R") begin
+                                user_sel_idx <= random_number + 1; // Random index between 1-4
                                 scan_slot <= 0;
                                 match_idx <= 1;
                                 sel_step <= 6'd17;
