@@ -987,7 +987,9 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     5'd18: begin
-                        if (query_valid && query_m == target_m && query_n == target_n) begin
+                        // For add: same dims as target_m/target_n; for mul: rows must equal op1_n.
+                        if (query_valid && ((selected_op_type == OP_ADD && query_m == target_m && query_n == target_n) ||
+                                            (selected_op_type == OP_MUL && query_m == op1_n))) begin
                             if (match_idx == user_sel_idx) begin
                                 op2_slot <= scan_slot[3:0];
                                 sel_step <= 6'd25; // Print Op1 then Op2
