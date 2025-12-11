@@ -18,6 +18,7 @@ module compute_mode #(
     // DIP switches and buttons
     input wire [2:0] dip_sw,
     input wire btn_confirm,
+    input wire btn_back,
     output reg [3:0] selected_op_type, 
 
     // UART interface
@@ -240,7 +241,24 @@ always @(posedge clk or negedge rst_n) begin
         commit_req <= 0;
         start_op <= 0;
         
-        case (sub_state)
+        // Handle external "back" button: return to operation selection
+        if (btn_back) begin
+            selected_op_type <= 4'd0;
+            error_code <= `ERR_NONE;
+            res_send_idx <= 8'd0;
+            read_idx <= 8'd0;
+            exec_state <= 4'd0;
+            sel_step <= 0;
+            scan_slot <= 0;
+            current_count <= 0;
+            input_accum <= 0;
+            start_op <= 1'b0;
+            tx_pending <= 1'b0;
+            alloc_req <= 0;
+            commit_req <= 0;
+            sub_state <= SELECT_OP;
+        end else begin
+            case (sub_state)
             IDLE: begin
                 selected_op_type <= 4'd0;
                 error_code <= `ERR_NONE;

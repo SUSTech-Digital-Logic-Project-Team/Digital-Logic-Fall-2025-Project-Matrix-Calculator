@@ -248,7 +248,20 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
                     endcase
                 end
             end
-            
+
+            // Special handling for Compute: if currently at the OP selection page (sub_state == SELECT_OP == 4'd1),
+            // pressing back should return to MAIN_MENU; otherwise (deeper compute sub-states) allow compute module
+            // to handle the back action (do not change main_state here).
+            `MODE_COMPUTE: begin
+                if (btn_back_pulse) begin
+                    if (sub_state_compute == 4'd1) begin
+                        main_state_next = `MAIN_MENU;
+                    end else begin
+                        main_state_next = `MODE_COMPUTE; // stay in compute, let compute_mode handle sub-state
+                    end
+                end
+            end
+
             default: begin 
                 if (btn_back_pulse) begin
                     main_state_next = `MAIN_MENU;
@@ -527,6 +540,7 @@ compute_mode compute_mode_inst (
         // ����������������źţ�???1?7??1?7����ԭʼ������
         .dip_sw(dip_sw),               
         .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
+        .btn_back(main_state == `MODE_COMPUTE ? btn_back_pulse : 1'b0),
         .selected_op_type(op_type_from_compute), 
         
         .rx_data(rx_data),
