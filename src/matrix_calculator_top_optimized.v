@@ -10,33 +10,33 @@ module matrix_calculator_top_optimized (
     input wire clk,
     input wire rst_n,
     input wire [2:0] dip_sw,
-    input wire btn_confirm,  // 
-    input wire btn_back,     // ��������
+    input wire btn_confirm,  // Confirm button
+    input wire btn_back,     // Back button
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display, // ע⣺display_ctrl ڲ?1?7??? wire 
+    output wire [6:0] seg_display, // Note: display_ctrl internal wire
     output wire [6:0] seg_countdown, // New port for countdown display
     output wire [3:0] led_status,
     output wire [1:0] seg_select,
     output wire [1:0] count_down_select // New port for countdown display selection
 );
     // ========================================
-    // 1. �������� (Debouncing) - �����޸�
+    // 1. Button Debouncing - Do not modify
     // ========================================
-    // �������ź�
+    // Button signals
     (* DONT_TOUCH = "true" *) wire btn_confirm_pulse; 
     (* DONT_TOUCH = "true" *) wire btn_back_pulse;
 
-    // ����ģ�飺ֱ�Ӵ���ԭʼ�����ź�
+    // Debounce module: directly processes raw button signal
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
-        .btn_in(btn_confirm),  // ԭʼ�����źţ�������������ʱΪ0��
-        .btn_pulse(btn_confirm_pulse) // �����������??
+        .btn_in(btn_confirm),  // Raw button signal, low when not pressed
+        .btn_pulse(btn_confirm_pulse) // Debounced pulse output
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
-        .btn_in(btn_back),     // ԭʼ�����ź�
-        .btn_pulse(btn_back_pulse) // �����������??
+        .btn_in(btn_back),     // Raw button signal
+        .btn_pulse(btn_back_pulse) // Debounced pulse output
     );
 
     // ========================================
@@ -541,7 +541,6 @@ compute_mode compute_mode_inst (
         .mode_active(compute_mode_active),
         .config_max_dim(config_max_dim),
         
-        // ����������������źţ�???1?7??1?7����ԭʼ������
         .dip_sw(dip_sw),               
         .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
         .btn_back(main_state == `MODE_COMPUTE ? btn_back_pulse : 1'b0),
@@ -620,15 +619,14 @@ display_ctrl disp_ctrl_inst (
         .rst_n(rst_n),
         .main_state(main_state),
         .sub_state(sub_state),
-        // ?1?7??? Compute ģʽ?1?7??? op_typeΪ 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         .error_code(error_code),
         .countdown_tens(countdown_tens),
         .countdown_ones(countdown_ones),
-        .seg_display(seg_display), // ֱ?1?7??? Output Port
-        .seg_countdown(seg_countdown), // New port for countdown display
+        .seg_display(seg_display), 
+        .seg_countdown(seg_countdown), 
         .led_status(led_status),
-        .seg_select(seg_select),    // ֱ?1?7??? Output Port
+        .seg_select(seg_select),    
         .count_down_select(count_down_select)
     );
 
