@@ -85,9 +85,6 @@ reg [7:0] parse_accum;        // Accumulator for multi-digit number
 reg digit_received;           // Flag for digit reception
 reg [7:0] elements_written;   // Counter for elements written
 
-// Allocation state
-reg alloc_m, alloc_n;         // Allocation dimensions
-
 // Display state variables
 reg [3:0] display_row;
 reg [3:0] display_col;
