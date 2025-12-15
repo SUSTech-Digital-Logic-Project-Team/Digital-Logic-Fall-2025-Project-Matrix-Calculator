@@ -208,11 +208,6 @@ always @(posedge clk or negedge rst_n) begin
             WAIT_ALLOC: begin
                 alloc_req <= 1'b1;
                 
-                // Debug echo
-                // if (!tx_busy && !tx_start) begin
-                //    tx_data <= "W"; // 回显：进入WAIT_ALLOC状态
-                //    tx_start <= 1'b1;
-                // end
                 
                 if (alloc_valid) begin
                     input_alloc_addr <= alloc_addr;
@@ -224,7 +219,6 @@ always @(posedge clk or negedge rst_n) begin
                     digit_received <= 1'b0;
                 end
                 // Note: If allocation fails, alloc_valid will remain low
-                // You may want to add a timeout counter here if needed
             end
             
             PARSE_DATA: begin
