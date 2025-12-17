@@ -24,7 +24,8 @@ module matrix_op_conv #(
     
     output reg mem_wr_en,
     output reg [ADDR_WIDTH-1:0] mem_wr_addr,
-    output reg [ELEMENT_WIDTH-1:0] mem_wr_data
+    output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
+    output reg [12:0] clock_cyc
 );
 
     reg [4:0] i, j;  // Extended to 5 bits for dim up to 16
@@ -32,6 +33,7 @@ module matrix_op_conv #(
     reg [3:0] state;
     reg [15:0] acc;
     reg [ELEMENT_WIDTH-1:0] val_a;
+    reg [12:0] clock_cycles;
     
     // Signed indices for boundary check
     reg signed [5:0] row_idx, col_idx;
@@ -56,7 +58,14 @@ module matrix_op_conv #(
             i <= 0; j <= 0;
             ki <= 0; kj <= 0;
             acc <= 0;
+            clock_cycles <= 0;
         end else begin
+            if(state != S_IDLE && state != S_DONE) begin
+                clock_cycles <= clock_cycles + 1;
+            end else if(state == S_IDLE && start) begin
+                clock_cycles <= 0;
+            end
+
             case (state)
                 S_IDLE: begin
                     done <= 0;
@@ -157,6 +166,7 @@ module matrix_op_conv #(
                 
                 S_DONE: begin
                     done <= 1;
+                    clock_cyc <= clock_cycles;
                     if (!start) state <= S_IDLE;
                 end
             endcase

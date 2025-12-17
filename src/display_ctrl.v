@@ -38,9 +38,9 @@ module display_ctrl (
     // 建议：
     localparam CHAR_T = 7'b1111000; // Display 'T'
     localparam CHAR_A = 7'b1110111; // Display 'A'
-    localparam CHAR_S = 7'b1101101; // Display 'S'
-    localparam CHAR_M = 7'b0110111; // Display 'M'
+    localparam CHAR_B = 7'b1111100; // Display 'B'
     localparam CHAR_C = 7'b0111001; // Display 'C'
+    localparam CHAR_J = 7'b0001110; // Display 'J'
 
     reg [6:0] disp_data_mode;
     reg [6:0] disp_data_op;
@@ -67,9 +67,9 @@ module display_ctrl (
             case (op_type)
                 3'd1: disp_data_op = CHAR_T; // Transpose
                 3'd2: disp_data_op = CHAR_A; // Add
-                3'd3: disp_data_op = CHAR_S; // Scalar
-                3'd4: disp_data_op = CHAR_M; // Mult
-                3'd5: disp_data_op = CHAR_C; // Conv 
+                3'd3: disp_data_op = CHAR_B; // b (Scalar)
+                3'd4: disp_data_op = CHAR_C; // Mult
+                3'd5: disp_data_op = CHAR_J; // Conv 
                 default: disp_data_op = S_OFF;
             endcase
         end else if (error_code != 0) begin

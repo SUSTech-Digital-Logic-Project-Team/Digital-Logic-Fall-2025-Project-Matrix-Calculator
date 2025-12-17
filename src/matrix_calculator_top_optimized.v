@@ -488,6 +488,8 @@ generate_mode generate_mode_inst (
     .alloc_slot(alloc_slot),
     .alloc_addr(alloc_addr),
     .alloc_valid(alloc_valid),
+    .alloc_m(alloc_m_generate),
+    .alloc_n(alloc_n_generate),
     .commit_req(commit_req_generate),
     .commit_slot(commit_slot_generate),
     .commit_m(commit_m_generate),

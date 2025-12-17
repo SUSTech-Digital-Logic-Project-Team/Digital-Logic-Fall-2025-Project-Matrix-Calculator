@@ -32,6 +32,8 @@ module generate_mode #(
     
     // Matrix manager interface
     output reg alloc_req,
+    output reg [4:0] alloc_m,
+    output reg [4:0] alloc_n,
     input wire [3:0] alloc_slot,
     input wire [ADDR_WIDTH-1:0] alloc_addr,
     input wire alloc_valid,
@@ -82,9 +84,6 @@ reg [3:0] gen_slot;
 reg [7:0] parse_accum;        // Accumulator for multi-digit number
 reg digit_received;           // Flag for digit reception
 reg [7:0] elements_written;   // Counter for elements written
-
-// Allocation state
-reg alloc_m, alloc_n;         // Allocation dimensions
 
 // Display state variables
 reg [3:0] display_row;
@@ -230,12 +229,12 @@ always @(posedge clk or negedge rst_n) begin
                     gen_slot <= alloc_slot;
                     elements_written <= 8'd0;
                     alloc_req <= 1'b0;
+                    alloc_m <= gen_m;
+                    alloc_n <= gen_n;
                     sub_state <= GEN_LATCH;
                     parse_accum <= 8'd0;
                     digit_received <= 1'b0;
                 end
-                // Note: If allocation fails, alloc_valid will remain low
-                // You may want to add a timeout counter here if needed
             end
             
             GEN_LATCH: begin

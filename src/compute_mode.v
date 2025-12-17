@@ -136,6 +136,7 @@ wire [ELEMENT_WIDTH-1:0] op_wr_data_mul;
 wire op_rd_en_conv, op_wr_en_conv, done_conv;
 wire [ADDR_WIDTH-1:0] op_rd_addr_conv, op_wr_addr_conv;
 wire [ELEMENT_WIDTH-1:0] op_wr_data_conv;
+wire [12:0] op_clock_cyc_conv;
 
 wire [4:0] conv_out_m = (op1_m > 5'd2) ? (op1_m - 5'd2) : 5'd0;
 wire [4:0] conv_out_n = (op1_n > 5'd2) ? (op1_n - 5'd2) : 5'd0;
@@ -178,13 +179,14 @@ matrix_op_conv op_conv_inst (
     .dim_m(op1_m), .dim_n(op1_n),
     .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
     .mem_rd_en(op_rd_en_conv), .mem_rd_addr(op_rd_addr_conv), .mem_rd_data(mem_rd_data),
-    .mem_wr_en(op_wr_en_conv), .mem_wr_addr(op_wr_addr_conv), .mem_wr_data(op_wr_data_conv)
+    .mem_wr_en(op_wr_en_conv), .mem_wr_addr(op_wr_addr_conv), .mem_wr_data(op_wr_data_conv), .clock_cyc(op_clock_cyc_conv)
 );
 
 assign done_op = done_add | done_smul | done_trans | done_mul | done_conv;
 
 reg internal_rd_en;
 reg [ADDR_WIDTH-1:0] internal_rd_addr;
+reg [12:0] convolution_clock_cyc;
 
 // Final MUX
 always @(*) begin
@@ -636,6 +638,7 @@ always @(posedge clk or negedge rst_n) begin
                                 end else if (selected_op_type == OP_MUL) begin
                                     // For Matrix Mul, we need to select 2nd matrix with potentially different dims
                                     // Reset stats and go to stats phase for 2nd operand
+                                    
                                     sel_step <= 6'd44; 
                                 end else if (selected_op_type == OP_ADD) begin
                                     // For Add, 2nd operand has same dims as 1st
@@ -1046,10 +1049,18 @@ always @(posedge clk or negedge rst_n) begin
                                 scalar_val <= rx_data - "0";
                                 sel_step <= 6'd25; // Print Op1 then Scalar
                                 error_code <= `ERR_NONE;
+                            end else if (rx_data == "R") begin
+                                scalar_val <= random_number % 10; // Random scalar between 0-9
+                                sel_step <= 6'd25; // Print Op1 then Scalar
+                                error_code <= `ERR_NONE;
                             end else begin
                                 error_code <= `ERR_VALUE_RANGE;
                                 if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
+                        end else if(btn_posedge) begin 
+                            scalar_val <= dip_sw; // Take scalar from DIP switches
+                            sel_step <= 6'd25; // Print Op1 then Scalar
+                            error_code <= `ERR_NONE;
                         end
                     end
 
@@ -1671,6 +1682,7 @@ always @(posedge clk or negedge rst_n) begin
                         end else if (selected_op_type == OP_CONV) begin
                             iter_m <= conv_out_m;
                             iter_n <= conv_out_n;
+                            convolution_clock_cyc <= op_clock_cyc_conv;
                         end else begin
                             iter_m <= target_m;
                             iter_n <= target_n;
@@ -1765,12 +1777,51 @@ always @(posedge clk or negedge rst_n) begin
                             tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == iter_m - 1) begin
-                                res_send_idx <= 5; 
+                                if(selected_op_type == OP_CONV) begin
+                                    // Send convolution clock cycles info
+                                    res_send_idx <= 9;
+                                end else begin
+                                    res_send_idx <= 5; // Done
+                                end
                             end else begin
                                 print_r <= print_r + 1;
                                 res_send_idx <= 2; 
                             end
                         end
+                    end
+                    9: begin 
+                        res_send_idx <= 10;
+                        convolution_clock_cyc <= op_clock_cyc_conv;
+                        print_step <= 0;
+                    end
+                    10: begin // print cycles
+                        if (!tx_busy && !tx_pending) begin
+                            if (convolution_clock_cyc >= 1000) begin
+                                case (print_step)
+                                    0: begin tx_data <= (convolution_clock_cyc / 1000) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((convolution_clock_cyc % 1000) / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= ((convolution_clock_cyc % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
+                                    3: begin tx_data <= (convolution_clock_cyc % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; res_send_idx <= 5; end
+                                endcase
+                            end else if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (convolution_clock_cyc / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((convolution_clock_cyc % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (convolution_clock_cyc % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; res_send_idx <= 5; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (convolution_clock_cyc / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (convolution_clock_cyc % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; res_send_idx <= 5; end
+                                endcase
+                            end else begin
+                                tx_data <= convolution_clock_cyc + "0";
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                res_send_idx <= 6;
+                            end
+                        end
+
                     end
                     5: begin // Done
                         sub_state <= DONE;
